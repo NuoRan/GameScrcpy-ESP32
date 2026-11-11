@@ -214,7 +214,7 @@ std::string boardStateText(const Board& board, Language language)
         return std::string(pick(language, "Busy with a task", "正在执行任务"));
     }
     if (!board.yieldedTo.empty()) {
-        return arg(pick(language, "In use by %1", "正在被 %1 使用"), board.yieldedTo);
+        return arg(pick(language, "In use by %1", "正被 %1 使用"), board.yieldedTo);
     }
     if (!board.connected) {
         return std::string(pick(language, "Not connected", "未连接"));

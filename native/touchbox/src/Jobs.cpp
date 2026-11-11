@@ -402,10 +402,10 @@ void Extension::runRename(std::uint64_t job, const std::string& device, const st
         return;
     }
     if (name.empty() || name.size() > static_cast<std::size_t>(GS_ESP32_MAX_NAME)) {
-        m_host.fail(job, pick(m_language, "The name has to be 1 to 32 bytes.", "名字要有 1～32 个字节。"));
+        m_host.fail(job, pick(m_language, "The name has to be 1 to 32 bytes.", "名称要有 1～32 个字节。"));
         return;
     }
-    m_host.progress(job, -1.0, pick(m_language, "Renaming the board…", "正在给开发板改名…"));
+    m_host.progress(job, -1.0, pick(m_language, "Renaming the board…", "正在重命名开发板…"));
     if (!link->setName(name)) {
         m_host.fail(job, notSentText(m_language));
         return;
