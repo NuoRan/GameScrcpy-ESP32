@@ -97,7 +97,7 @@ TEST_CASE("ADR-0112: a board on the devices page is a touch box with its state, 
     Board air = readyBoard();
     air.id = "wifi-192-168-1-20-4545";
     air.where = "192.168.1.20:4545";
-    air.wifi = true;
+    air.via = esp32::LinkMode::Wifi;
     const Json wireless = Json::parse(gs::touchbox::devicesJson({air}, Language::English))[0];
     CHECK_FALSE(wireless.contains("resource"));
     CHECK(actionIds(wireless) == std::vector<std::string>{"settings", "tap", "diagnose", "disconnect"});
@@ -114,6 +114,52 @@ TEST_CASE("ADR-0112: a board on the devices page is a touch box with its state, 
     CHECK(chinese[0].at("stateText") == "正在被投屏窗口使用");
     CHECK(chinese[1].at("name") == "ESP32 触控盒");
     CHECK(chinese[0].at("actions")[0].at("title") == "设置");
+}
+
+TEST_CASE("ADR-0112: a board on Bluetooth shows the Bluetooth icon, its signal and its ble: resource, and the panel "
+          "learns when its delay is high")
+{
+    Board board = readyBoard();
+    board.id = "ble-de-ad-be-ef-01-04";
+    board.where = "DE:AD:BE:EF:01:04";
+    board.via = esp32::LinkMode::Bluetooth;
+    board.kind = esp32::PortKind::Other;
+    board.signal = -58;
+    const Json device = Json::parse(gs::touchbox::devicesJson({board}, Language::English))[0];
+    CHECK(device.at("icon") == "bluetooth");
+    CHECK(device.at("resource") == "ble:DE:AD:BE:EF:01:04");
+    CHECK(device.at("summary") ==
+          "ESP32-S3 · firmware 1.0.2 · Bluetooth DE:AD:BE:EF:01:04 · Signal good (-58 dBm) · Phone connected over USB");
+    CHECK(actionIds(device) == std::vector<std::string>{"settings", "tap", "diagnose", "disconnect"});
+
+    Json value = Json::parse(gs::touchbox::boardJson(board, std::nullopt, Language::English));
+    CHECK(value.at("via") == "ble");
+    CHECK(value.at("bluetooth") == true);
+    CHECK(value.at("wifi") == false);
+    CHECK(value.at("signal") == -58);
+    CHECK(value.at("signalText") == "Signal good (-58 dBm)");
+    CHECK(value.at("slowBluetooth") == false);
+    CHECK(value.at("slowTripMs").is_null());
+    CHECK(value.at("resource") == "ble:DE:AD:BE:EF:01:04");
+
+    board.slowTrip = std::chrono::microseconds{45000};
+    board.signal = -85;
+    value = Json::parse(gs::touchbox::boardJson(board, std::nullopt, Language::Chinese));
+    CHECK(value.at("slowBluetooth") == true);
+    CHECK(value.at("slowText") == "蓝牙延迟较高");
+    CHECK(value.at("slowTripMs") == 45.0);
+    CHECK(value.at("signalText") == "信号弱（-85 dBm）");
+
+    Board serial = readyBoard();
+    serial.slowTrip = std::chrono::microseconds{45000};
+    CHECK_FALSE(gs::touchbox::slowLink(serial));
+    Board quick = board;
+    quick.slowTrip = std::chrono::microseconds{12000};
+    CHECK_FALSE(gs::touchbox::slowLink(quick));
+    CHECK_FALSE(gs::touchbox::sameShape(board, quick));
+    Board stronger = board;
+    stronger.signal = -84;
+    CHECK(gs::touchbox::sameShape(board, stronger));
 }
 
 TEST_CASE("ADR-0112: texts for the devices page stay within its limits and are cut on whole characters")

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <gs/esp32/Bluetooth.h>
 #include <gs/esp32/Diagnosis.h>
 #include <gs/esp32/Link.h>
 #include <gs/esp32/Port.h>
@@ -27,8 +28,9 @@ class UsbWatcher;
 
 namespace gs::touchbox {
 
-[[nodiscard]] std::string boardIdOf(std::string_view where, bool wifi);
+[[nodiscard]] std::string boardIdOf(std::string_view where, esp32::LinkMode via);
 [[nodiscard]] std::string serialResource(std::string_view where);
+[[nodiscard]] std::string resourceOf(std::string_view where, esp32::LinkMode via);
 [[nodiscard]] bool samePort(std::string_view a, std::string_view b) noexcept;
 [[nodiscard]] bool sameResource(std::string_view a, std::string_view b) noexcept;
 
@@ -36,7 +38,7 @@ enum class Holder : std::uint8_t { Session, Flash, Job };
 
 struct Hold {
     std::string where;
-    bool wifi = false;
+    esp32::LinkMode via = esp32::LinkMode::Serial;
     bool every = false;
     Holder holder = Holder::Session;
 
@@ -44,11 +46,11 @@ struct Hold {
 };
 
 [[nodiscard]] Hold holdOf(const esp32::Esp32Settings& settings);
-[[nodiscard]] bool covers(const Hold& hold, std::string_view where, bool wifi) noexcept;
+[[nodiscard]] bool covers(const Hold& hold, std::string_view where, esp32::LinkMode via) noexcept;
 
 struct Candidate {
     std::string where;
-    bool wifi = false;
+    esp32::LinkMode via = esp32::LinkMode::Serial;
     esp32::PortKind kind = esp32::PortKind::Other;
     bool chosen = false;
 
@@ -62,7 +64,7 @@ struct Candidate {
 struct Probe {
     std::unique_ptr<esp32::Esp32Link> link;
     std::string where;
-    bool wifi = false;
+    esp32::LinkMode via = esp32::LinkMode::Serial;
     esp32::PortKind kind = esp32::PortKind::Other;
 };
 
@@ -78,6 +80,7 @@ struct FleetHooks {
         probe = probeBoard;
     std::function<bool(const std::string& resource, bool wait)> claim;
     std::function<void(const std::string& resource)> release;
+    std::shared_ptr<esp32::BleRadio> radio;
     bool watchUsb = true;
     std::chrono::milliseconds retry{15000};
     std::chrono::milliseconds tapHold{80};
@@ -86,11 +89,13 @@ struct FleetHooks {
 struct Board {
     std::string id;
     std::string where;
-    bool wifi = false;
+    esp32::LinkMode via = esp32::LinkMode::Serial;
     esp32::PortKind kind = esp32::PortKind::Other;
     std::optional<esp32::BoardInfo> info;
     esp32::BoardStatus status;
     std::optional<std::chrono::microseconds> roundTrip;
+    std::optional<std::chrono::microseconds> slowTrip;
+    std::optional<int> signal;
     esp32::BoardTrouble trouble;
     bool legacy = false;
     bool connected = false;
@@ -102,6 +107,9 @@ struct Board {
     friend bool operator==(const Board&, const Board&) = default;
 };
 
+inline constexpr std::chrono::milliseconds kSlowBluetooth{30};
+
+[[nodiscard]] bool slowLink(const Board& board) noexcept;
 [[nodiscard]] bool sameShape(const Board& a, const Board& b) noexcept;
 
 struct Taken {
@@ -139,8 +147,8 @@ public:
     [[nodiscard]] Taken take(std::string_view id, const std::string& owner, Holder holder);
     void hold(const std::string& owner, Hold wanted);
     void release(const std::string& owner, std::chrono::milliseconds delay = std::chrono::milliseconds{0});
-    [[nodiscard]] bool held(std::string_view where, bool wifi) const;
-    [[nodiscard]] bool inSession(std::string_view where, bool wifi) const;
+    [[nodiscard]] bool held(std::string_view where, esp32::LinkMode via) const;
+    [[nodiscard]] bool inSession(std::string_view where, esp32::LinkMode via) const;
     [[nodiscard]] bool acquire(const std::string& resource, bool wait);
     void unacquire(const std::string& resource);
     [[nodiscard]] bool yield(std::string_view resource, std::string_view by);
@@ -159,7 +167,7 @@ private:
     struct Entry {
         std::string id;
         std::string where;
-        bool wifi = false;
+        esp32::LinkMode via = esp32::LinkMode::Serial;
         esp32::PortKind kind = esp32::PortKind::Other;
         std::optional<esp32::BoardInfo> info;
         esp32::BoardStatus status;
@@ -202,7 +210,7 @@ private:
     void run(const std::stop_token& stop);
     void lift(const std::stop_token& stop);
     [[nodiscard]] Scan scanOnce(const Job& job, const std::stop_token& cancel);
-    [[nodiscard]] esp32::LinkEvents linkEvents() const;
+    [[nodiscard]] esp32::LinkEvents linkEvents(esp32::LinkMode via) const;
     [[nodiscard]] Job jobLocked() const;
     void requestScanLocked();
     void scheduleLocked(std::chrono::milliseconds delay);
@@ -218,9 +226,9 @@ private:
     void notify();
     [[nodiscard]] bool wantsRetryLocked() const;
     [[nodiscard]] Board snapshotLocked(const Entry& entry) const;
-    [[nodiscard]] const Hold* holdOverLocked(std::string_view where, bool wifi) const;
-    [[nodiscard]] bool dismissedLocked(std::string_view where, bool wifi) const;
-    [[nodiscard]] Entry* entryAtLocked(std::string_view where, bool wifi);
+    [[nodiscard]] const Hold* holdOverLocked(std::string_view where, esp32::LinkMode via) const;
+    [[nodiscard]] bool dismissedLocked(std::string_view where, esp32::LinkMode via) const;
+    [[nodiscard]] Entry* entryAtLocked(std::string_view where, esp32::LinkMode via);
     [[nodiscard]] Entry* entryNamedLocked(std::string_view id);
     [[nodiscard]] const Entry* entryNamedLocked(std::string_view id) const;
     void eraseLocked(std::size_t index, Dropped& dropped);

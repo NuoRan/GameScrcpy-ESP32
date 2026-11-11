@@ -69,6 +69,8 @@ Json featuresOf(std::uint32_t features)
         {GS_ESP32_FEATURE_BLE_HID, "bleHid"},
         {GS_ESP32_FEATURE_WIFI, "wifi"},
         {GS_ESP32_FEATURE_USB_SERIAL_LINK, "usbSerialLink"},
+        {GS_ESP32_FEATURE_BLE_LINK, "bluetoothLink"},
+        {GS_ESP32_FEATURE_KEYED, "keyed"},
     };
     for (const auto& [bit, name] : named) {
         if ((features & bit) != 0) {
@@ -85,7 +87,7 @@ Json actionsOf(const Board& board, Language language)
     if (board.connected && !board.held) {
         actions.push_back({{"id", "tap"}, {"title", pick(language, "Try it", "试一下")}});
     }
-    if (!board.wifi) {
+    if (board.via == esp32::LinkMode::Serial) {
         actions.push_back({{"id", "flash"}, {"title", pick(language, "Flash firmware", "刷写固件")}, {"job", "flash"}});
     }
     actions.push_back({{"id", "diagnose"}, {"title", pick(language, "Diagnose", "诊断")}, {"job", "diagnose"}});
@@ -101,7 +103,9 @@ Json boardValue(const Board& board, const std::optional<espflash::FirmwareBundle
     value["id"] = board.id;
     value["name"] = boardName(board, language);
     value["where"] = board.where;
-    value["wifi"] = board.wifi;
+    value["via"] = std::string(esp32::linkModeName(board.via));
+    value["wifi"] = board.via == esp32::LinkMode::Wifi;
+    value["bluetooth"] = board.via == esp32::LinkMode::Bluetooth;
     value["state"] = boardState(board);
     value["stateText"] = boardStateText(board, language);
     value["summary"] = boardSummary(board, language);
@@ -111,7 +115,7 @@ Json boardValue(const Board& board, const std::optional<espflash::FirmwareBundle
     value["flashing"] = board.flashing;
     value["held"] = board.held;
     value["yieldedTo"] = board.yieldedTo;
-    value["resource"] = board.wifi ? std::string() : serialResource(board.where);
+    value["resource"] = resourceOf(board.where, board.via);
     if (board.info) {
         value["chip"] = esp32::chipName(board.info->chipId);
         value["target"] = esp32::chipTarget(board.info->chipId);
@@ -121,6 +125,7 @@ Json boardValue(const Board& board, const std::optional<espflash::FirmwareBundle
         value["protocol"] = board.info->protocol;
         value["features"] = featuresOf(board.info->features);
         value["hasWifi"] = (board.info->features & GS_ESP32_FEATURE_WIFI) != 0;
+        value["hasBluetoothLink"] = (board.info->features & GS_ESP32_FEATURE_BLE_LINK) != 0;
         value["parts"] = partsLine(*board.info, board.status, language);
     } else {
         value["chip"] = nullptr;
@@ -131,6 +136,7 @@ Json boardValue(const Board& board, const std::optional<espflash::FirmwareBundle
         value["protocol"] = nullptr;
         value["features"] = Json::array();
         value["hasWifi"] = false;
+        value["hasBluetoothLink"] = false;
         value["parts"] = "";
     }
     value["phone"] = board.connected && !board.legacy ? phoneText(board.status, language) : std::string();
@@ -143,6 +149,20 @@ Json boardValue(const Board& board, const std::optional<espflash::FirmwareBundle
         value["roundTripMs"] = static_cast<double>(board.roundTrip->count()) / 1000.0;
     } else {
         value["roundTripMs"] = nullptr;
+    }
+    if (board.slowTrip) {
+        value["slowTripMs"] = static_cast<double>(board.slowTrip->count()) / 1000.0;
+    } else {
+        value["slowTripMs"] = nullptr;
+    }
+    value["slowBluetooth"] = slowLink(board);
+    value["slowText"] = slowLink(board) ? slowBluetoothText(language) : std::string();
+    if (board.signal) {
+        value["signal"] = *board.signal;
+        value["signalText"] = signalText(*board.signal, language);
+    } else {
+        value["signal"] = nullptr;
+        value["signalText"] = "";
     }
     value["problem"] = board.legacy ? troubleText(board.trouble, language) : std::string();
     value["bundled"] = bundle ? Json(bundle->version) : Json(nullptr);
@@ -184,7 +204,20 @@ std::string boardSummary(const Board& board, Language language)
     } else if (board.legacy) {
         parts.emplace_back(pick(language, "ESP32 with the old firmware", "装着旧固件的 ESP32"));
     }
-    parts.push_back(board.wifi ? arg(pick(language, "Wi-Fi %1", "Wi-Fi %1"), board.where) : board.where);
+    switch (board.via) {
+    case esp32::LinkMode::Wifi:
+        parts.push_back(arg(pick(language, "Wi-Fi %1", "Wi-Fi %1"), board.where));
+        break;
+    case esp32::LinkMode::Bluetooth:
+        parts.push_back(arg(pick(language, "Bluetooth %1", "蓝牙 %1"), board.where));
+        if (board.signal) {
+            parts.push_back(signalText(*board.signal, language));
+        }
+        break;
+    case esp32::LinkMode::Serial:
+        parts.push_back(board.where);
+        break;
+    }
     if (board.connected && !board.legacy) {
         parts.push_back(phoneText(board.status, language));
     }
@@ -242,10 +275,10 @@ std::string devicesJson(const std::vector<Board>& boards, Language language)
         device["summary"] = boardSummary(board, language);
         device["state"] = boardState(board);
         device["stateText"] = cutUtf8(boardStateText(board, language), kMostSummaryBytes);
-        device["icon"] = kBoardIcon;
+        device["icon"] = board.via == esp32::LinkMode::Bluetooth ? kBluetoothIcon : kBoardIcon;
         device["touchMethod"] = kTouchMethodName;
-        if (!board.wifi) {
-            device["resource"] = serialResource(board.where);
+        if (std::string resource = resourceOf(board.where, board.via); !resource.empty()) {
+            device["resource"] = std::move(resource);
         }
         device["capture"] = true;
         device["actions"] = actionsOf(board, language);

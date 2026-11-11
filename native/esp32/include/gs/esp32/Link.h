@@ -60,9 +60,13 @@ struct BoardStatus {
     friend bool operator==(const BoardStatus&, const BoardStatus&) = default;
 };
 
+inline constexpr std::size_t kRoundTripHistory = 100;
+inline constexpr std::size_t kRoundTripsForSlowest = 20;
+
 struct LinkOptions {
     bool fastBaud = false;
     bool allowLegacy = true;
+    bool measure = false;
     std::chrono::milliseconds helloWait{GS_ESP32_HELLO_WAIT_MS};
     std::chrono::milliseconds keepAlive{500};
     std::chrono::milliseconds silence{3000};
@@ -100,6 +104,8 @@ public:
     [[nodiscard]] BoardStatus status() const;
     [[nodiscard]] BoardTrouble trouble() const;
     [[nodiscard]] std::optional<std::chrono::microseconds> roundTrip() const;
+    [[nodiscard]] std::optional<std::chrono::microseconds> slowRoundTrip() const;
+    [[nodiscard]] std::optional<int> signal() const;
     [[nodiscard]] std::uint32_t baud() const;
     [[nodiscard]] bool datagrams() const;
 
@@ -113,6 +119,9 @@ public:
     [[nodiscard]] bool ping();
     [[nodiscard]] bool setWifi(std::string_view ssid, std::string_view password,
                                std::span<const std::uint8_t, GS_ESP32_KEY_SIZE> key);
+    [[nodiscard]] bool setKey(std::span<const std::uint8_t, GS_ESP32_KEY_SIZE> key);
+    [[nodiscard]] std::uint32_t hellos() const;
+    [[nodiscard]] bool waitHello(std::uint32_t after, std::chrono::milliseconds timeout) const;
     [[nodiscard]] bool forgetWifi();
     [[nodiscard]] bool setName(std::string_view name);
     [[nodiscard]] bool reboot();
@@ -154,6 +163,9 @@ private:
     std::optional<BoardInfo> m_board;
     BoardStatus m_status;
     std::optional<std::chrono::microseconds> m_roundTrip;
+    std::array<std::chrono::microseconds, kRoundTripHistory> m_trips{};
+    std::size_t m_tripCount = 0;
+    std::optional<int> m_signal;
     std::optional<std::pair<std::uint32_t, Clock::time_point>> m_ping;
     std::uint32_t m_baud = GS_ESP32_HANDSHAKE_BAUD;
     std::uint8_t m_seq = 0;
@@ -169,6 +181,7 @@ private:
     std::size_t m_unframed = 0;
     BoardTrouble m_trouble;
     std::atomic<Clock::rep> m_lastSent{0};
+    std::atomic<Clock::rep> m_lastPinged{0};
     Clock::time_point m_lastReceived{};
     gs_esp32_parser m_parser{};
     std::jthread m_thread;

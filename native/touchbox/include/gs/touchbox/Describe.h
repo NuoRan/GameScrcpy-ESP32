@@ -17,6 +17,7 @@ inline constexpr std::string_view kProviderName = "boards";
 inline constexpr std::string_view kTouchMethodName = "esp32";
 inline constexpr std::string_view kBoardPanel = "board";
 inline constexpr std::string_view kBoardIcon = "svg:icons/board.svg";
+inline constexpr std::string_view kBluetoothIcon = "bluetooth";
 inline constexpr std::size_t kMostSummaryBytes = 200;
 
 [[nodiscard]] std::string boardName(const Board& board, Language language);

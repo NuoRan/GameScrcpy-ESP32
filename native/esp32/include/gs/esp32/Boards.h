@@ -22,6 +22,7 @@ struct KnownBoard {
     std::string name;
     BoardKey key{};
     std::string address;
+    std::string bluetooth;
 
     friend bool operator==(const KnownBoard&, const KnownBoard&) = default;
 };
@@ -34,5 +35,6 @@ struct KnownBoard {
 [[nodiscard]] std::vector<KnownBoard> rememberBoard(std::vector<KnownBoard> boards, const KnownBoard& board);
 [[nodiscard]] std::vector<KnownBoard> forgetBoard(std::vector<KnownBoard> boards, std::string_view id);
 [[nodiscard]] std::optional<KnownBoard> findBoard(const std::vector<KnownBoard>& boards, std::string_view id);
+[[nodiscard]] std::optional<KnownBoard> findBluetooth(const std::vector<KnownBoard>& boards, std::string_view address);
 
 }

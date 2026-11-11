@@ -1,5 +1,6 @@
 #include "gs/esp32/TouchMethod.h"
 
+#include "gs/esp32/BlePort.h"
 #include "gs/esp32/Boards.h"
 #include "gs/esp32/Discovery.h"
 #include "gs/esp32/UdpPort.h"
@@ -17,6 +18,8 @@ constexpr std::string_view kCategory = "esp32";
 constexpr std::chrono::milliseconds kBrowseTime{2000};
 constexpr std::chrono::milliseconds kSettleMargin{3000};
 constexpr std::chrono::milliseconds kSettleSlice{50};
+constexpr std::chrono::milliseconds kFindTime{3000};
+constexpr std::chrono::milliseconds kBluetoothGiveUp{4000};
 constexpr int kMostMouseStep = 32767;
 constexpr int kMostWheel = 127;
 
@@ -68,7 +71,7 @@ std::optional<OpenedLink> tryPort(const SerialPortInfo& port, bool allowLegacy, 
     if (settled != LinkState::Ready && settled != LinkState::Legacy) {
         return std::nullopt;
     }
-    return OpenedLink{.link = std::move(link), .where = port.name, .kind = port.kind, .wifi = false};
+    return OpenedLink{.link = std::move(link), .where = port.name, .kind = port.kind, .mode = LinkMode::Serial};
 }
 
 Expected<OpenedLink, OpenFailure> openSerial(const Esp32Settings& settings, const LinkEvents& events,
@@ -177,7 +180,111 @@ Expected<OpenedLink, OpenFailure> openWifi(const Esp32Settings& settings, const 
     if (settle(*link, options.udpGiveUp + kSettleMargin, stop) != LinkState::Ready) {
         return makeUnexpected(stop.stop_requested() ? OpenFailure::Stopped : OpenFailure::NoAnswer);
     }
-    return OpenedLink{.link = std::move(link), .where = where, .kind = PortKind::Other, .wifi = true};
+    return OpenedLink{.link = std::move(link), .where = where, .kind = PortKind::Other, .mode = LinkMode::Wifi};
+}
+
+OpenFailure failureOf(BleFailure failure) noexcept
+{
+    switch (failure) {
+    case BleFailure::NoRadio:
+        return OpenFailure::NoBluetooth;
+    case BleFailure::NotPaired:
+    case BleFailure::Refused:
+        return OpenFailure::NotPaired;
+    case BleFailure::NotFound:
+    case BleFailure::Unreachable:
+        return OpenFailure::NoBoard;
+    case BleFailure::None:
+    case BleFailure::NoService:
+        break;
+    }
+    return OpenFailure::NoAnswer;
+}
+
+void addKey(std::vector<BoardKey>& keys, const BoardKey& key)
+{
+    if (std::ranges::find(keys, key) == keys.end()) {
+        keys.push_back(key);
+    }
+}
+
+Expected<OpenedLink, OpenFailure> openBluetooth(const Esp32Settings& settings, const LinkEvents& events,
+                                                const std::stop_token& stop)
+{
+    if (settings.radio == nullptr) {
+        return makeUnexpected(OpenFailure::NoBluetooth);
+    }
+    BleRadio& radio = *settings.radio;
+    const BluetoothState state = radio.state();
+    if (state == BluetoothState::Missing || state == BluetoothState::Off) {
+        return makeUnexpected(OpenFailure::NoBluetooth);
+    }
+    std::optional<std::uint64_t> target;
+    std::vector<BoardKey> keys;
+    if (!settings.address.empty()) {
+        target = parseBluetooth(settings.address);
+        if (!target) {
+            return makeUnexpected(OpenFailure::BadAddress);
+        }
+        if (const std::optional<KnownBoard> board = findBluetooth(settings.knownBoards, settings.address)) {
+            addKey(keys, board->key);
+        }
+        for (const KnownBoard& board : settings.knownBoards) {
+            addKey(keys, board.key);
+        }
+        if (keys.empty()) {
+            return makeUnexpected(OpenFailure::NoKey);
+        }
+        if (!radio.linked(*target) && !radio.find(*target, kFindTime, stop)) {
+            return makeUnexpected(stop.stop_requested() ? OpenFailure::Stopped : OpenFailure::NoBoard);
+        }
+    } else {
+        const std::vector<SeenBoard> nearby = radio.seen(kSeenRecently);
+        bool paired = false;
+        for (const KnownBoard& board : settings.knownBoards) {
+            const std::optional<std::uint64_t> address = parseBluetooth(board.bluetooth);
+            if (!address) {
+                continue;
+            }
+            paired = true;
+            const bool inReach = std::ranges::any_of(nearby, [&address](const SeenBoard& seen) {
+                return seen.address == *address;
+            });
+            if (inReach || radio.linked(*address) || radio.find(*address, kFindTime, stop)) {
+                target = address;
+                addKey(keys, board.key);
+                break;
+            }
+            if (stop.stop_requested()) {
+                return makeUnexpected(OpenFailure::Stopped);
+            }
+        }
+        if (!target) {
+            return makeUnexpected(paired ? OpenFailure::NoBoard : OpenFailure::NotPaired);
+        }
+    }
+    const std::uint64_t address = *target;
+    BleFailure failure = BleFailure::None;
+    std::unique_ptr<BlePort> port = BlePort::open(
+        [&radio, address](BleChannelEvents channelEvents, BleFailure& channelFailure) {
+            return radio.open(address, std::move(channelEvents), channelFailure);
+        },
+        std::move(keys), failure);
+    if (port == nullptr) {
+        return makeUnexpected(failureOf(failure));
+    }
+    LinkOptions options;
+    options.allowLegacy = false;
+    options.measure = true;
+    options.udpGiveUp = kBluetoothGiveUp;
+    auto link = std::make_unique<Esp32Link>(std::move(port), options, events);
+    if (settle(*link, options.udpGiveUp + kSettleMargin, stop) != LinkState::Ready) {
+        return makeUnexpected(stop.stop_requested() ? OpenFailure::Stopped : OpenFailure::NoAnswer);
+    }
+    return OpenedLink{.link = std::move(link),
+                      .where = bluetoothText(address),
+                      .kind = PortKind::Other,
+                      .mode = LinkMode::Bluetooth};
 }
 
 int clampStep(int value, int most) noexcept
@@ -187,11 +294,35 @@ int clampStep(int value, int most) noexcept
 
 }
 
+LinkMode linkModeOf(std::string_view name) noexcept
+{
+    if (name == "wifi") {
+        return LinkMode::Wifi;
+    }
+    return name == "ble" ? LinkMode::Bluetooth : LinkMode::Serial;
+}
+
+std::string_view linkModeName(LinkMode mode) noexcept
+{
+    switch (mode) {
+    case LinkMode::Wifi:
+        return "wifi";
+    case LinkMode::Bluetooth:
+        return "ble";
+    case LinkMode::Serial:
+        break;
+    }
+    return "serial";
+}
+
 Expected<OpenedLink, OpenFailure> openBoard(const Esp32Settings& settings, LinkEvents events,
                                             const std::stop_token& stop)
 {
     if (settings.link == LinkMode::Wifi) {
         return openWifi(settings, events, stop);
+    }
+    if (settings.link == LinkMode::Bluetooth) {
+        return openBluetooth(settings, events, stop);
     }
     return openSerial(settings, events, stop);
 }

@@ -1,5 +1,7 @@
 #include "gs/esp32/Boards.h"
 
+#include "gs/esp32/Bluetooth.h"
+
 #include <gs/support/Crypto.h>
 
 #include <nlohmann/json.hpp>
@@ -108,6 +110,11 @@ std::vector<KnownBoard> parseBoards(std::string_view json)
         if (const auto address = entry.find("address"); address != entry.end() && address->is_string()) {
             board.address = address->get<std::string>().substr(0, kMostAddress);
         }
+        if (const auto bluetooth = entry.find("bluetooth"); bluetooth != entry.end() && bluetooth->is_string()) {
+            if (const std::optional<std::uint64_t> parsed = parseBluetooth(bluetooth->get<std::string>())) {
+                board.bluetooth = bluetoothText(*parsed);
+            }
+        }
         boards.push_back(std::move(board));
     }
     return boards;
@@ -127,6 +134,9 @@ std::string writeBoards(const std::vector<KnownBoard>& boards)
         entry["key"] = platform::toHex(board.key);
         if (!board.address.empty()) {
             entry["address"] = board.address;
+        }
+        if (!board.bluetooth.empty()) {
+            entry["bluetooth"] = board.bluetooth;
         }
         list[board.id] = std::move(entry);
     }
@@ -159,6 +169,16 @@ std::vector<KnownBoard> forgetBoard(std::vector<KnownBoard> boards, std::string_
 std::optional<KnownBoard> findBoard(const std::vector<KnownBoard>& boards, std::string_view id)
 {
     const auto found = std::ranges::find(boards, id, &KnownBoard::id);
+    if (found == boards.end()) {
+        return std::nullopt;
+    }
+    return *found;
+}
+
+std::optional<KnownBoard> findBluetooth(const std::vector<KnownBoard>& boards, std::string_view address)
+{
+    const auto found = std::ranges::find_if(
+        boards, [address](const KnownBoard& board) { return sameBluetooth(board.bluetooth, address); });
     if (found == boards.end()) {
         return std::nullopt;
     }

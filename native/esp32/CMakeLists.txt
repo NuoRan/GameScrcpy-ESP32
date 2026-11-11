@@ -1,4 +1,6 @@
 add_library(gs_esp32 STATIC
+    include/gs/esp32/BlePort.h
+    include/gs/esp32/Bluetooth.h
     include/gs/esp32/Boards.h
     include/gs/esp32/Contacts.h
     include/gs/esp32/Diagnosis.h
@@ -9,6 +11,8 @@ add_library(gs_esp32 STATIC
     include/gs/esp32/TouchMethod.h
     include/gs/esp32/UdpPort.h
     "${PROJECT_SOURCE_DIR}/protocol/gs_esp32_protocol.h"
+    src/BlePort.cpp
+    src/Bluetooth.cpp
     src/Boards.cpp
     src/Contacts.cpp
     src/Diagnosis.cpp
@@ -18,6 +22,7 @@ add_library(gs_esp32 STATIC
     src/SerialPort.cpp
     src/TouchMethod.cpp
     src/UdpPort.cpp
+    src/WinBluetooth.cpp
 )
 add_library(gs::esp32 ALIAS gs_esp32)
 
@@ -27,5 +32,8 @@ target_include_directories(gs_esp32 PUBLIC
 )
 target_link_libraries(gs_esp32
     PUBLIC gs::support
-    PRIVATE gs::nlohmann_json setupapi cfgmgr32 advapi32 dnsapi ws2_32)
+    PRIVATE gs::nlohmann_json setupapi cfgmgr32 advapi32 dnsapi ws2_32 ole32 windowsapp)
 gs_apply_compiler_policy(gs_esp32)
+if(MSVC)
+    set_source_files_properties(src/WinBluetooth.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
+endif()

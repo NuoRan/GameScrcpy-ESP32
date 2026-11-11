@@ -7,6 +7,7 @@
 #include <array>
 #include <format>
 #include <iterator>
+#include <vector>
 
 namespace gs::esp32 {
 
@@ -151,6 +152,28 @@ std::optional<std::chrono::microseconds> Esp32Link::roundTrip() const
     return m_roundTrip;
 }
 
+std::optional<std::chrono::microseconds> Esp32Link::slowRoundTrip() const
+{
+    std::vector<std::chrono::microseconds> trips;
+    {
+        const std::lock_guard lock(m_mutex);
+        const std::size_t known = std::min(m_tripCount, m_trips.size());
+        trips.assign(m_trips.begin(), m_trips.begin() + static_cast<std::ptrdiff_t>(known));
+    }
+    if (trips.size() < kRoundTripsForSlowest) {
+        return std::nullopt;
+    }
+    std::ranges::sort(trips);
+    const std::size_t index = (trips.size() * 99 + 99) / 100 - 1;
+    return trips[std::min(index, trips.size() - 1)];
+}
+
+std::optional<int> Esp32Link::signal() const
+{
+    const std::lock_guard lock(m_mutex);
+    return m_signal;
+}
+
 BoardTrouble Esp32Link::trouble() const
 {
     const std::lock_guard lock(m_mutex);
@@ -230,7 +253,9 @@ void Esp32Link::run(const std::stop_token& stop)
         const LinkState current = state();
         if (current == LinkState::Ready) {
             const Clock::time_point lastSent{Clock::duration{m_lastSent.load(std::memory_order_acquire)}};
-            if (now - lastSent >= m_options.keepAlive) {
+            const Clock::time_point lastPinged{Clock::duration{m_lastPinged.load(std::memory_order_acquire)}};
+            if (now - lastSent >= m_options.keepAlive ||
+                (m_options.measure && now - lastPinged >= m_options.keepAlive)) {
                 (void)ping();
             }
             if (now - m_lastReceived >= m_options.silence) {
@@ -552,6 +577,7 @@ void Esp32Link::dispatch(const gs_esp32_frame& frame)
             ++m_hellos;
             promote = m_state == LinkState::Legacy;
         }
+        m_settled.notify_all();
         if (promote) {
             log::info(kCategory, "the board answered after all: using protocol v2");
             setState(LinkState::Ready);
@@ -584,13 +610,20 @@ void Esp32Link::dispatch(const gs_esp32_frame& frame)
             return;
         }
         std::optional<std::chrono::microseconds> measured;
+        std::int8_t strength = 0;
+        const bool signalled = gs_esp32_decode_signal(frame.payload, frame.length, &strength) != 0;
         {
             const std::lock_guard lock(m_mutex);
             m_lastPong = token;
             if (m_ping && m_ping->first == token) {
                 measured = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - m_ping->second);
                 m_roundTrip = measured;
+                m_trips[m_tripCount % m_trips.size()] = *measured;
+                ++m_tripCount;
                 m_ping.reset();
+            }
+            if (signalled) {
+                m_signal = strength;
             }
         }
         if (measured && m_events.roundTrip) {
@@ -749,10 +782,12 @@ bool Esp32Link::ping()
         return false;
     }
     const std::uint32_t token = nextToken();
+    const Clock::time_point now = Clock::now();
     {
         const std::lock_guard lock(m_mutex);
-        m_ping = std::pair{token, Clock::now()};
+        m_ping = std::pair{token, now};
     }
+    m_lastPinged.store(now.time_since_epoch().count(), std::memory_order_release);
     std::array<std::uint8_t, 4> payload{};
     const std::size_t size = gs_esp32_encode_token(payload.data(), payload.size(), token);
     return sendFrame(GS_ESP32_MSG_PING, {payload.data(), size});
@@ -769,6 +804,27 @@ bool Esp32Link::setWifi(std::string_view ssid, std::string_view password,
     std::array<std::uint8_t, kWifiPayload> payload{};
     const std::size_t size = gs_esp32_encode_wifi_set(payload.data(), payload.size(), &message);
     return size > 0 && sendWhenReady(GS_ESP32_MSG_WIFI_SET, {payload.data(), size});
+}
+
+bool Esp32Link::setKey(std::span<const std::uint8_t, GS_ESP32_KEY_SIZE> key)
+{
+    std::array<std::uint8_t, GS_ESP32_KEY_SIZE> payload{};
+    const std::size_t size = gs_esp32_encode_key_set(payload.data(), payload.size(), key.data());
+    return size > 0 && sendWhenReady(GS_ESP32_MSG_KEY_SET, {payload.data(), size});
+}
+
+std::uint32_t Esp32Link::hellos() const
+{
+    return helloCount();
+}
+
+bool Esp32Link::waitHello(std::uint32_t after, std::chrono::milliseconds timeout) const
+{
+    std::unique_lock lock(m_mutex);
+    static_cast<void>(m_settled.wait_for(lock, timeout, [this, after] {
+        return m_hellos > after || m_state == LinkState::Lost || m_state == LinkState::Closed;
+    }));
+    return m_hellos > after;
 }
 
 bool Esp32Link::forgetWifi()

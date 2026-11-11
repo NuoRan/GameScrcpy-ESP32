@@ -205,7 +205,7 @@ public:
                 return gs::makeUnexpected(stop.stop_requested() ? esp32::OpenFailure::Stopped
                                                                 : esp32::OpenFailure::NoAnswer);
             }
-            return Probe{.link = std::move(link), .where = candidate.where, .wifi = false, .kind = candidate.kind};
+            return Probe{.link = std::move(link), .where = candidate.where, .via = candidate.via, .kind = candidate.kind};
         };
         hooks.claim = [this](const std::string& resource, bool) {
             const std::scoped_lock lock(m_mutex);
@@ -253,9 +253,11 @@ bool connected(const Fleet& fleet, const std::string& id)
 
 TEST_CASE("ADR-0112: a board is named by its place, and a hold covers it by its serial port or by Wi-Fi")
 {
-    CHECK(gs::touchbox::boardIdOf("COM5", false) == "serial-com5");
-    CHECK(gs::touchbox::boardIdOf("192.168.1.20:4545", true) == "wifi-192-168-1-20-4545");
-    CHECK(gs::touchbox::boardIdOf(std::string(80, 'a'), true).size() == 64);
+    constexpr esp32::LinkMode serial = esp32::LinkMode::Serial;
+    constexpr esp32::LinkMode network = esp32::LinkMode::Wifi;
+    CHECK(gs::touchbox::boardIdOf("COM5", serial) == "serial-com5");
+    CHECK(gs::touchbox::boardIdOf("192.168.1.20:4545", network) == "wifi-192-168-1-20-4545");
+    CHECK(gs::touchbox::boardIdOf(std::string(80, 'a'), network).size() == 64);
     CHECK(gs::touchbox::serialResource("com5") == "serial:COM5");
     CHECK(gs::touchbox::sameResource("serial:com5", "SERIAL:COM5"));
     CHECK_FALSE(gs::touchbox::sameResource("serial:COM5", "serial:COM15"));
@@ -264,24 +266,60 @@ TEST_CASE("ADR-0112: a board is named by its place, and a hold covers it by its 
     CHECK_FALSE(gs::touchbox::samePort("", ""));
 
     const Hold every = gs::touchbox::holdOf(automatic());
-    CHECK(every == Hold{.where = "", .wifi = false, .every = true});
-    CHECK(gs::touchbox::covers(every, "COM3", false));
-    CHECK_FALSE(gs::touchbox::covers(every, "192.168.1.20:4545", true));
+    CHECK(every == Hold{.where = "", .via = serial, .every = true});
+    CHECK(gs::touchbox::covers(every, "COM3", serial));
+    CHECK_FALSE(gs::touchbox::covers(every, "192.168.1.20:4545", network));
 
     esp32::Esp32Settings chosen = automatic();
     chosen.port = "COM5";
     const Hold one = gs::touchbox::holdOf(chosen);
     CHECK(one == Hold{.where = "COM5"});
-    CHECK(gs::touchbox::covers(one, "com5", false));
-    CHECK_FALSE(gs::touchbox::covers(one, "COM6", false));
+    CHECK(gs::touchbox::covers(one, "com5", serial));
+    CHECK_FALSE(gs::touchbox::covers(one, "COM6", serial));
 
     esp32::Esp32Settings wifi = automatic();
     wifi.link = esp32::LinkMode::Wifi;
     wifi.address = "esp32.local";
     const Hold air = gs::touchbox::holdOf(wifi);
-    CHECK(air.wifi);
-    CHECK(gs::touchbox::covers(air, "192.168.1.20:4545", true));
-    CHECK_FALSE(gs::touchbox::covers(air, "COM5", false));
+    CHECK(air.via == network);
+    CHECK(gs::touchbox::covers(air, "192.168.1.20:4545", network));
+    CHECK_FALSE(gs::touchbox::covers(air, "COM5", serial));
+}
+
+TEST_CASE("ADR-0112: a board on Bluetooth is named and claimed by its address, and a hold covers one address or all")
+{
+    constexpr esp32::LinkMode radio = esp32::LinkMode::Bluetooth;
+    CHECK(gs::touchbox::boardIdOf("DE:AD:BE:EF:01:04", radio) == "ble-de-ad-be-ef-01-04");
+    CHECK(gs::touchbox::resourceOf("de:ad:be:ef:01:04", radio) == "ble:DE:AD:BE:EF:01:04");
+    CHECK(gs::touchbox::resourceOf("COM5", esp32::LinkMode::Serial) == "serial:COM5");
+    CHECK(gs::touchbox::resourceOf("192.168.1.20", esp32::LinkMode::Wifi).empty());
+
+    esp32::Esp32Settings settings = automatic();
+    settings.link = radio;
+    const Hold all = gs::touchbox::holdOf(settings);
+    CHECK(all == Hold{.where = "", .via = radio, .every = true});
+    CHECK(gs::touchbox::covers(all, "DE:AD:BE:EF:01:04", radio));
+    CHECK_FALSE(gs::touchbox::covers(all, "COM5", esp32::LinkMode::Serial));
+
+    settings.address = "de-ad-be-ef-01-04";
+    const Hold one = gs::touchbox::holdOf(settings);
+    CHECK(one == Hold{.where = "DE:AD:BE:EF:01:04", .via = radio, .every = false});
+    CHECK(gs::touchbox::covers(one, "DEADBEEF0104", radio));
+    CHECK_FALSE(gs::touchbox::covers(one, "DE:AD:BE:EF:01:05", radio));
+
+    const std::vector<Candidate> chosen = gs::touchbox::candidatesOf(settings, {}, {});
+    REQUIRE(chosen.size() == 1);
+    CHECK(chosen[0] == Candidate{.where = "DE:AD:BE:EF:01:04", .via = radio, .kind = esp32::PortKind::Other, .chosen = true});
+
+    settings.address.clear();
+    CHECK(gs::touchbox::candidatesOf(settings, {}, {}).empty());
+    settings.knownBoards.push_back(esp32::KnownBoard{.id = "deadbeef0102", .bluetooth = "DE:AD:BE:EF:01:04"});
+    settings.knownBoards.push_back(esp32::KnownBoard{.id = "a1b2c3d4e5f6"});
+    settings.knownBoards.push_back(esp32::KnownBoard{.id = "001122334455", .bluetooth = "00:11:22:33:44:57"});
+    const std::vector<Candidate> paired = gs::touchbox::candidatesOf(settings, {}, {});
+    CHECK(placesOf(paired) == std::vector<std::string>{"DE:AD:BE:EF:01:04", "00:11:22:33:44:57"});
+    CHECK_FALSE(paired[0].chosen);
+    CHECK(placesOf(gs::touchbox::candidatesOf(settings, {}, {one})) == std::vector<std::string>{"00:11:22:33:44:57"});
 }
 
 TEST_CASE("ADR-0112: the boards looked for are the ESP32-like ports, the chosen port or the Wi-Fi address, minus those "
@@ -306,7 +344,8 @@ TEST_CASE("ADR-0112: the boards looked for are the ESP32-like ports, the chosen 
     chosen.port = "COM9";
     const std::vector<Candidate> unlisted = gs::touchbox::candidatesOf(chosen, ports, {});
     REQUIRE(unlisted.size() == 1);
-    CHECK(unlisted[0] == Candidate{.where = "COM9", .wifi = false, .kind = esp32::PortKind::Other, .chosen = true});
+    CHECK(unlisted[0] ==
+          Candidate{.where = "COM9", .via = esp32::LinkMode::Serial, .kind = esp32::PortKind::Other, .chosen = true});
     chosen.port = "COM7";
     const std::vector<Candidate> listed = gs::touchbox::candidatesOf(chosen, ports, {});
     REQUIRE(listed.size() == 1);
@@ -319,9 +358,12 @@ TEST_CASE("ADR-0112: the boards looked for are the ESP32-like ports, the chosen 
     wifi.address = "192.168.1.20:4545";
     const std::vector<Candidate> remote = gs::touchbox::candidatesOf(wifi, ports, {});
     REQUIRE(remote.size() == 1);
-    CHECK(remote[0] ==
-          Candidate{.where = "192.168.1.20:4545", .wifi = true, .kind = esp32::PortKind::Other, .chosen = true});
-    CHECK(gs::touchbox::candidatesOf(wifi, ports, {Hold{.where = "10.0.0.9:4545", .wifi = true}}).empty());
+    CHECK(remote[0] == Candidate{.where = "192.168.1.20:4545",
+                                 .via = esp32::LinkMode::Wifi,
+                                 .kind = esp32::PortKind::Other,
+                                 .chosen = true});
+    CHECK(gs::touchbox::candidatesOf(wifi, ports, {Hold{.where = "10.0.0.9:4545", .via = esp32::LinkMode::Wifi}})
+              .empty());
     CHECK(gs::touchbox::candidatesOf(wifi, ports, {Hold{.where = "COM5"}}).size() == 1);
 }
 
@@ -340,7 +382,7 @@ TEST_CASE("ADR-0112: a board that answers on an ESP32-like port is found and cla
     const Board found = fleet.boards().front();
     CHECK(found.id == "serial-com7");
     CHECK(found.where == "COM7");
-    CHECK_FALSE(found.wifi);
+    CHECK(found.via == esp32::LinkMode::Serial);
     CHECK(found.connected);
     CHECK_FALSE(found.held);
     REQUIRE(found.info.has_value());
@@ -382,7 +424,7 @@ TEST_CASE("ADR-0112: a session takes the board's link together with its claim, a
     CHECK(held->inSession);
     CHECK_FALSE(held->connected);
     CHECK(held->info.has_value());
-    CHECK(fleet.inSession("COM7", false));
+    CHECK(fleet.inSession("COM7", esp32::LinkMode::Serial));
     CHECK(fleet.take("serial-com7", "session:2", Holder::Session).link == nullptr);
 
     const int probes = bench.probesOf("COM7");
@@ -397,7 +439,7 @@ TEST_CASE("ADR-0112: a session takes the board's link together with its claim, a
     REQUIRE(connected(fleet, "serial-com7"));
     CHECK(bench.probesOf("COM7") == probes + 1);
     CHECK(bench.held() == std::set<std::string>{"serial:COM7"});
-    CHECK_FALSE(fleet.inSession("COM7", false));
+    CHECK_FALSE(fleet.inSession("COM7", esp32::LinkMode::Serial));
 }
 
 TEST_CASE("ADR-0112: a hold closes the board's port and keeps it out of the scans until it is released")
@@ -410,8 +452,8 @@ TEST_CASE("ADR-0112: a hold closes the board's port and keeps it out of the scan
 
     fleet.hold("flash:1", Hold{.where = "COM7", .holder = Holder::Flash});
     CHECK(fleet.link("serial-com7") == nullptr);
-    CHECK(fleet.held("COM7", false));
-    CHECK_FALSE(fleet.inSession("COM7", false));
+    CHECK(fleet.held("COM7", esp32::LinkMode::Serial));
+    CHECK_FALSE(fleet.inSession("COM7", esp32::LinkMode::Serial));
     const std::optional<Board> flashing = fleet.board("serial-com7");
     REQUIRE(flashing.has_value());
     CHECK(flashing->flashing);
@@ -429,7 +471,7 @@ TEST_CASE("ADR-0112: a hold closes the board's port and keeps it out of the scan
 
     fleet.hold("phone", gs::touchbox::holdOf(automatic()));
     CHECK(fleet.link("serial-com7") == nullptr);
-    CHECK(fleet.inSession("COM7", false));
+    CHECK(fleet.inSession("COM7", esp32::LinkMode::Serial));
     fleet.release("phone");
     CHECK(connected(fleet, "serial-com7"));
 }
@@ -606,4 +648,59 @@ TEST_CASE("ADR-0112: a board that keeps restarting is reported as such, not as o
     CHECK(fleet.trouble()->problem == esp32::BoardProblem::Restarting);
     CHECK(fleet.trouble()->resetReason == "0x3 (RTC_SW_SYS_RST)");
     CHECK(fleet.boards().empty());
+}
+
+TEST_CASE("ADR-0112: in Bluetooth mode the paired boards are found, claimed by their ble: resource and let go to "
+          "whoever asks")
+{
+    std::mutex mutex;
+    std::set<std::string> held;
+    FleetHooks hooks;
+    hooks.watchUsb = false;
+    hooks.list = [] { return std::vector<esp32::SerialPortInfo>{}; };
+    hooks.probe = [](const Candidate& candidate, const esp32::Esp32Settings&, esp32::LinkEvents events,
+                     const std::stop_token&, esp32::BoardTrouble&) -> Probed {
+        FakeBoard::Options options;
+        options.datagrams = true;
+        esp32::LinkOptions linkOptions;
+        linkOptions.allowLegacy = false;
+        auto link = std::make_unique<esp32::Esp32Link>(std::make_unique<FakeBoard>(options), linkOptions,
+                                                       std::move(events));
+        if (link->waitSettled(3s) != esp32::LinkState::Ready) {
+            return gs::makeUnexpected(esp32::OpenFailure::NoAnswer);
+        }
+        return Probe{.link = std::move(link), .where = candidate.where, .via = candidate.via, .kind = candidate.kind};
+    };
+    hooks.claim = [&mutex, &held](const std::string& resource, bool) {
+        const std::scoped_lock lock(mutex);
+        held.insert(resource);
+        return true;
+    };
+    hooks.release = [&mutex, &held](const std::string& resource) {
+        const std::scoped_lock lock(mutex);
+        held.erase(resource);
+    };
+    const auto heldNow = [&mutex, &held] {
+        const std::scoped_lock lock(mutex);
+        return held;
+    };
+    Fleet fleet(hooks);
+    esp32::Esp32Settings settings = automatic();
+    settings.link = esp32::LinkMode::Bluetooth;
+    settings.knownBoards.push_back(esp32::KnownBoard{.id = "deadbeef0102", .bluetooth = "DE:AD:BE:EF:01:04"});
+    lookFor(fleet, settings);
+    REQUIRE(connected(fleet, "ble-de-ad-be-ef-01-04"));
+    const std::optional<Board> board = fleet.board("ble-de-ad-be-ef-01-04");
+    REQUIRE(board.has_value());
+    CHECK(board->via == esp32::LinkMode::Bluetooth);
+    CHECK(board->where == "DE:AD:BE:EF:01:04");
+    CHECK(heldNow() == std::set<std::string>{"ble:DE:AD:BE:EF:01:04"});
+    CHECK(fleet.matching(settings).has_value());
+
+    CHECK(fleet.yield("ble:de:ad:be:ef:01:04", "Your logic"));
+    CHECK(fleet.link("ble-de-ad-be-ef-01-04") == nullptr);
+    const std::optional<Board> yielded = fleet.board("ble-de-ad-be-ef-01-04");
+    REQUIRE(yielded.has_value());
+    CHECK(yielded->yieldedTo == "Your logic");
+    CHECK(eventually([&heldNow] { return heldNow().empty(); }));
 }

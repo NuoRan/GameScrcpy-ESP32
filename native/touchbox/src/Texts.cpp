@@ -71,15 +71,21 @@ std::string arg(std::string_view pattern, std::string_view first, std::string_vi
     return replaced(replaced(pattern, "%1", first), "%2", second);
 }
 
-std::string openFailureText(esp32::OpenFailure failure, bool wifi, Language language)
+std::string openFailureText(esp32::OpenFailure failure, esp32::LinkMode via, Language language)
 {
     switch (failure) {
     case esp32::OpenFailure::NoBoard:
-        if (wifi) {
+        if (via == esp32::LinkMode::Wifi) {
             return std::string(pick(language,
                                     "No ESP32 touch box answered over Wi-Fi. Check that the board and this computer "
                                     "are on the same network, or enter the board's address.",
                                     "没有 ESP32 触控盒通过 Wi-Fi 应答。检查开发板与这台电脑是否在同一个网络，或者填写开发板的地址。"));
+        }
+        if (via == esp32::LinkMode::Bluetooth) {
+            return std::string(pick(language,
+                                    "No paired ESP32 touch box answered over Bluetooth. Check that the board is on and "
+                                    "near this computer, or pair it again in the extension's settings.",
+                                    "没有已配对的 ESP32 触控盒经蓝牙应答。检查开发板是否通电、离这台电脑够不够近，或者在扩展的设置里重新配对。"));
         }
         return std::string(pick(language,
                                 "No ESP32 touch box was found. Plug the board's serial port into this computer, or "
@@ -94,22 +100,97 @@ std::string openFailureText(esp32::OpenFailure failure, bool wifi, Language lang
                                 "right now.",
                                 "串口正被别的程序占用。可能有一台正在投屏的手机在用这块开发板。"));
     case esp32::OpenFailure::NoAnswer:
+        if (via == esp32::LinkMode::Bluetooth) {
+            return std::string(pick(language,
+                                    "The board does not answer over Bluetooth. Flash firmware 1.1 or later, which lets "
+                                    "a computer connect over Bluetooth, and pair the board again.",
+                                    "开发板没有经蓝牙应答。请刷入 1.1 或更新的固件（它才能让电脑经蓝牙连接），再重新配对。"));
+        }
         return std::string(pick(language,
                                 "The board does not answer. On an ESP32-S3, connect the computer to the port marked "
                                 "COM or UART; the other USB port goes to the phone. If it still does not answer, flash "
                                 "the firmware.",
                                 "开发板没有应答。ESP32-S3 要把电脑接到标着 COM 或 UART 的口，另一个 USB 口接手机。还是没有应答就刷一次固件。"));
     case esp32::OpenFailure::NoKey:
+        if (via == esp32::LinkMode::Bluetooth) {
+            return std::string(pick(language,
+                                    "Plug the board into this computer by USB once and pair it from its window; that "
+                                    "gives the board its key.",
+                                    "先用 USB 把开发板接到这台电脑，在它的窗口里配对一次，开发板会在那时拿到密钥。"));
+        }
         return std::string(pick(language,
                                 "Set up Wi-Fi once while the board is on the serial port; then it can be reached over "
                                 "Wi-Fi.",
                                 "先用串口连上开发板设置一次 Wi-Fi，之后就能通过 Wi-Fi 连接。"));
     case esp32::OpenFailure::BadAddress:
         return std::string(pick(language, "That address is not valid.", "这个地址无效。"));
+    case esp32::OpenFailure::NoBluetooth:
+        return std::string(pick(language, "This computer has no Bluetooth LE, or Bluetooth is off.",
+                                "这台电脑没有低功耗蓝牙，或者蓝牙已关闭。"));
+    case esp32::OpenFailure::NotPaired:
+        return std::string(pick(language,
+                                "No board is paired over Bluetooth yet. Pair one in the extension's settings first.",
+                                "还没有经蓝牙配对的开发板。请先在扩展的设置里配对一块。"));
     case esp32::OpenFailure::Stopped:
         break;
     }
     return {};
+}
+
+std::string signalText(int dbm, Language language)
+{
+    const std::string value = std::to_string(dbm);
+    switch (esp32::signalLevel(dbm)) {
+    case esp32::SignalLevel::Good:
+        return arg(pick(language, "Signal good (%1 dBm)", "信号好（%1 dBm）"), value);
+    case esp32::SignalLevel::Fair:
+        return arg(pick(language, "Signal fair (%1 dBm)", "信号一般（%1 dBm）"), value);
+    case esp32::SignalLevel::Weak:
+        break;
+    }
+    return arg(pick(language, "Signal weak (%1 dBm)", "信号弱（%1 dBm）"), value);
+}
+
+std::string slowBluetoothText(Language language)
+{
+    return std::string(pick(language, "Bluetooth delay is high", "蓝牙延迟较高"));
+}
+
+std::string bluetoothStateText(esp32::BluetoothState state, Language language)
+{
+    switch (state) {
+    case esp32::BluetoothState::Unknown:
+        return std::string(pick(language, "Checking this computer's Bluetooth…", "正在查看这台电脑的蓝牙…"));
+    case esp32::BluetoothState::Missing:
+        return std::string(pick(language, "This computer has no Bluetooth LE.", "这台电脑没有低功耗蓝牙。"));
+    case esp32::BluetoothState::Off:
+        return std::string(pick(language, "Bluetooth is off. Turn it on in the Windows settings.",
+                                "蓝牙已关闭，请在 Windows 设置里打开。"));
+    case esp32::BluetoothState::Ready:
+        break;
+    }
+    return std::string(pick(language, "Bluetooth is on.", "蓝牙已打开。"));
+}
+
+std::string pairFailureText(esp32::PairOutcome outcome, Language language)
+{
+    switch (outcome) {
+    case esp32::PairOutcome::NoRadio:
+        return std::string(pick(language, "This computer has no Bluetooth LE, or Bluetooth is off.",
+                                "这台电脑没有低功耗蓝牙，或者蓝牙已关闭。"));
+    case esp32::PairOutcome::NotFound:
+        return std::string(pick(language, "Windows cannot find the board. Keep it on and near this computer, then try again.",
+                                "Windows 找不到这块开发板。让它保持通电、靠近这台电脑，再试一次。"));
+    case esp32::PairOutcome::Refused:
+        return std::string(pick(language,
+                                "The board refused to pair. Remove it from the Windows Bluetooth settings, restart the "
+                                "board, then pair again.",
+                                "开发板拒绝了配对。在 Windows 的蓝牙设置里删除它，重启开发板后再配对。"));
+    case esp32::PairOutcome::Paired:
+    case esp32::PairOutcome::Failed:
+        break;
+    }
+    return std::string(pick(language, "Pairing did not work. Try again.", "配对没有成功，请再试一次。"));
 }
 
 std::string flashFailureText(espflash::FlashFailure failure, Language language)

@@ -127,3 +127,28 @@ TEST_CASE("ADR-0112: Wi-Fi keys are remembered per board in the extension's stor
     CHECK(gs::esp32::parseBoards(gs::esp32::writeBoards(known)) == known);
     CHECK_FALSE(gs::esp32::findBoard(known, "ffffffffffff").has_value());
 }
+
+TEST_CASE("ADR-0112: the key book keeps each board's Bluetooth address in one form and finds a board by it")
+{
+    KnownBoard board;
+    board.id = "a1b2c3d4e5f6";
+    board.key = gs::esp32::newBoardKey();
+    board.bluetooth = "A1:B2:C3:D4:E5:F8";
+    const std::vector<KnownBoard> written = gs::esp32::parseBoards(gs::esp32::writeBoards({board}));
+    REQUIRE(written.size() == 1);
+    CHECK(written[0] == board);
+    CHECK(gs::esp32::findBluetooth(written, "a1-b2-c3-d4-e5-f8").has_value());
+    CHECK_FALSE(gs::esp32::findBluetooth(written, "A1:B2:C3:D4:E5:F9").has_value());
+    CHECK_FALSE(gs::esp32::findBluetooth(written, "").has_value());
+
+    const std::string stored = R"({"format": "community.esp32-boards", "version": 1, "boards": {
+        "001122334455": {"key": "0101010101010101010101010101010101010101010101010101010101010101",
+                         "bluetooth": "a1b2c3d4e5f8"},
+        "001122334466": {"key": "0202020202020202020202020202020202020202020202020202020202020202",
+                         "bluetooth": "not an address"}}})";
+    const std::vector<KnownBoard> read = gs::esp32::parseBoards(stored);
+    REQUIRE(read.size() == 2);
+    CHECK(read[0].bluetooth == "A1:B2:C3:D4:E5:F8");
+    CHECK(read[1].bluetooth.empty());
+    CHECK(gs::esp32::writeBoards(read).find("\"bluetooth\": \"A1:B2:C3:D4:E5:F8\"") != std::string::npos);
+}

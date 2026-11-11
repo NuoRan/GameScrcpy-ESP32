@@ -100,8 +100,27 @@ std::string_view openFailureName(esp32::OpenFailure failure) noexcept
         return "the board's address is not valid";
     case esp32::OpenFailure::Stopped:
         return "opening was stopped";
+    case esp32::OpenFailure::NoBluetooth:
+        return "this computer's Bluetooth is missing or off";
+    case esp32::OpenFailure::NotPaired:
+        return "no board is paired over Bluetooth";
     }
     return "the board could not be opened";
+}
+
+std::string_view bluetoothStateName(esp32::BluetoothState state) noexcept
+{
+    switch (state) {
+    case esp32::BluetoothState::Missing:
+        return "missing";
+    case esp32::BluetoothState::Off:
+        return "off";
+    case esp32::BluetoothState::Ready:
+        return "ready";
+    case esp32::BluetoothState::Unknown:
+        break;
+    }
+    return "unknown";
 }
 
 }
@@ -129,11 +148,14 @@ Extension::Extension(const gs_ext_host* host, PluginOptions options)
         log::warning(kCategory, "no firmware could be read from the extension's firmware folder");
     }
     m_known = loadKnown();
+    m_radio = options.radio != nullptr ? options.radio : esp32::systemBluetooth();
+    static_cast<void>(m_radio->state());
     FleetHooks hooks = options.hooks.value_or(FleetHooks{});
     hooks.claim = [this](const std::string& resource, bool wait) {
         return m_host.claim(resource, wait) == Claimed::Yes;
     };
     hooks.release = [this](const std::string& resource) { m_host.release(resource); };
+    hooks.radio = m_radio;
     m_fleet = std::make_unique<Fleet>(std::move(hooks), [this] { fleetChanged(); });
     m_fleet->setSettings(globalSettings());
     m_fleet->start();
@@ -176,10 +198,10 @@ esp32::Esp32Settings Extension::globalSettings() const
     esp32::Esp32Settings settings;
     const std::string port = trimmed(textSetting("port").value_or(std::string()));
     settings.port = port.empty() ? std::string(esp32::kAutomaticPort) : port;
-    settings.link = textSetting("link").value_or(std::string()) == "wifi" ? esp32::LinkMode::Wifi
-                                                                           : esp32::LinkMode::Serial;
+    settings.link = esp32::linkModeOf(textSetting("link").value_or(std::string()));
     settings.address = trimmed(textSetting("address").value_or(std::string()));
     settings.knownBoards = knownBoards();
+    settings.radio = m_radio;
     return settings;
 }
 
@@ -205,7 +227,7 @@ esp32::Esp32Settings Extension::settingsFor(std::string_view options) const
         settings.port = chosen.empty() ? std::string(esp32::kAutomaticPort) : chosen;
     }
     if (const std::optional<std::string> link = valueOf("link")) {
-        settings.link = *link == "wifi" ? esp32::LinkMode::Wifi : esp32::LinkMode::Serial;
+        settings.link = esp32::linkModeOf(*link);
     }
     if (const std::optional<std::string> address = valueOf("address")) {
         settings.address = trimmed(*address);
@@ -288,7 +310,7 @@ void Extension::fleetChanged()
         }
         m_shown = boards;
         for (const Board& board : boards) {
-            if (board.wifi || !board.info || board.status.wifi != GS_ESP32_WIFI_CONNECTED) {
+            if (board.via != esp32::LinkMode::Serial || !board.info || board.status.wifi != GS_ESP32_WIFI_CONNECTED) {
                 continue;
             }
             const std::string id = esp32::boardId(board.info->mac);
@@ -372,8 +394,7 @@ std::int32_t Extension::openTouch(const gs_ext_touch_open* info, void** session)
                 log::warning(kCategory, "the ESP32 touch box did not open: {}", openFailureName(opened.error()));
                 return GS_EXT_FAILED;
             }
-            if (!opened->wifi) {
-                const std::string resource = serialResource(opened->where);
+            if (const std::string resource = resourceOf(opened->where, opened->mode); !resource.empty()) {
                 if (!m_fleet->acquire(resource, false)) {
                     opened->link.reset();
                     m_fleet->release(made->owner);
@@ -382,7 +403,7 @@ std::int32_t Extension::openTouch(const gs_ext_touch_open* info, void** session)
                 }
                 made->resource = resource;
             }
-            m_fleet->hold(made->owner, Hold{.where = opened->where, .wifi = opened->wifi, .every = false,
+            m_fleet->hold(made->owner, Hold{.where = opened->where, .via = opened->mode, .every = false,
                                             .holder = Holder::Session});
             made->method.attach(std::move(opened->link));
         }
@@ -531,7 +552,7 @@ std::int32_t Extension::problemNode(gs_ext_result* result)
         text = troubleText(*trouble, m_language);
     }
     if (const std::optional<esp32::OpenFailure> problem = m_fleet->problem(); text.empty() && problem) {
-        text = openFailureText(*problem, m_fleet->settings().link == esp32::LinkMode::Wifi, m_language);
+        text = openFailureText(*problem, m_fleet->settings().link, m_language);
     }
     return m_host.setText(result, GS_EXT_TYPE_STRING, text);
 }
@@ -554,6 +575,51 @@ std::int32_t Extension::rescanNode(gs_ext_result* result)
 {
     m_fleet->forgive();
     return flagResult(result, true);
+}
+
+std::int32_t Extension::bluetoothNode(gs_ext_result* result)
+{
+    return jsonResult(result, bluetoothJson());
+}
+
+std::string Extension::bluetoothJson() const
+{
+    const std::vector<esp32::KnownBoard> known = knownBoards();
+    const std::vector<Board> boards = m_fleet->boards();
+    Json found = Json::array();
+    for (const esp32::SeenBoard& seen : m_radio->seen(esp32::kSeenRecently)) {
+        const std::string address = esp32::bluetoothText(seen.address);
+        const std::optional<esp32::KnownBoard> book = esp32::findBoard(known, seen.advert.id);
+        const bool connected = std::ranges::any_of(boards, [&address](const Board& board) {
+            return board.via == esp32::LinkMode::Bluetooth && board.connected && esp32::sameBluetooth(board.where, address);
+        });
+        found.push_back({{"address", address},
+                         {"id", seen.advert.id},
+                         {"name", seen.name.empty() ? std::string(pick(m_language, "ESP32 touch box", "ESP32 触控盒"))
+                                                    : cutUtf8(seen.name, 64)},
+                         {"chip", esp32::chipName(seen.advert.chipId)},
+                         {"signal", seen.signal},
+                         {"signalText", signalText(seen.signal, m_language)},
+                         {"keyed", seen.advert.keyed},
+                         {"busy", seen.advert.busy},
+                         {"known", book.has_value()},
+                         {"paired", book.has_value() && esp32::sameBluetooth(book->bluetooth, address)},
+                         {"connected", connected}});
+    }
+    Json paired = Json::array();
+    for (const esp32::KnownBoard& board : known) {
+        if (!board.bluetooth.empty()) {
+            paired.push_back({{"id", board.id}, {"name", board.name}, {"address", board.bluetooth}});
+        }
+    }
+    const esp32::BluetoothState state = m_radio->state();
+    Json value = Json::object();
+    value["state"] = std::string(bluetoothStateName(state));
+    value["stateText"] = bluetoothStateText(state, m_language);
+    value["scanning"] = m_scans.load(std::memory_order_acquire) > 0;
+    value["boards"] = std::move(found);
+    value["paired"] = std::move(paired);
+    return value.dump(-1, ' ', false, Json::error_handler_t::replace);
 }
 
 void Extension::settingsChanged()

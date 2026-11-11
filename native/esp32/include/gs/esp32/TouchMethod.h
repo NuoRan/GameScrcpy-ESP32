@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gs/esp32/Bluetooth.h"
 #include "gs/esp32/Boards.h"
 #include "gs/esp32/Contacts.h"
 #include "gs/esp32/Keys.h"
@@ -20,24 +21,38 @@
 
 namespace gs::esp32 {
 
-enum class LinkMode : std::uint8_t { Serial, Wifi };
+enum class LinkMode : std::uint8_t { Serial, Wifi, Bluetooth };
 
 inline constexpr std::string_view kAutomaticPort = "auto";
+
+[[nodiscard]] LinkMode linkModeOf(std::string_view name) noexcept;
+[[nodiscard]] std::string_view linkModeName(LinkMode mode) noexcept;
 
 struct Esp32Settings {
     std::string port = std::string(kAutomaticPort);
     LinkMode link = LinkMode::Serial;
     std::string address;
     std::vector<KnownBoard> knownBoards;
+    std::shared_ptr<BleRadio> radio;
 };
 
-enum class OpenFailure : std::uint8_t { NoBoard, PortMissing, PortBusy, NoAnswer, NoKey, BadAddress, Stopped };
+enum class OpenFailure : std::uint8_t {
+    NoBoard,
+    PortMissing,
+    PortBusy,
+    NoAnswer,
+    NoKey,
+    BadAddress,
+    Stopped,
+    NoBluetooth,
+    NotPaired,
+};
 
 struct OpenedLink {
     std::unique_ptr<Esp32Link> link;
     std::string where;
     PortKind kind = PortKind::Other;
-    bool wifi = false;
+    LinkMode mode = LinkMode::Serial;
 };
 
 [[nodiscard]] Expected<OpenedLink, OpenFailure> openBoard(const Esp32Settings& settings, LinkEvents events = {},

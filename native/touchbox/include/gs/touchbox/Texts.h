@@ -19,7 +19,11 @@ enum class Language : std::uint8_t { English, Chinese };
 [[nodiscard]] std::string arg(std::string_view pattern, std::string_view first);
 [[nodiscard]] std::string arg(std::string_view pattern, std::string_view first, std::string_view second);
 
-[[nodiscard]] std::string openFailureText(esp32::OpenFailure failure, bool wifi, Language language);
+[[nodiscard]] std::string openFailureText(esp32::OpenFailure failure, esp32::LinkMode via, Language language);
+[[nodiscard]] std::string signalText(int dbm, Language language);
+[[nodiscard]] std::string slowBluetoothText(Language language);
+[[nodiscard]] std::string bluetoothStateText(esp32::BluetoothState state, Language language);
+[[nodiscard]] std::string pairFailureText(esp32::PairOutcome outcome, Language language);
 [[nodiscard]] std::string flashFailureText(espflash::FlashFailure failure, Language language);
 [[nodiscard]] std::string flashStageText(espflash::FlashStage stage, Language language);
 [[nodiscard]] std::string phoneText(const esp32::BoardStatus& status, Language language);

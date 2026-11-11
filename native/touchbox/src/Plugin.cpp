@@ -170,6 +170,14 @@ int32_t callRescan(void*, const gs_ext_value*, uint32_t count, gs_ext_result* re
     return guarded([result](Extension& extension) { return extension.rescanNode(result); });
 }
 
+int32_t callBluetooth(void*, const gs_ext_value*, uint32_t count, gs_ext_result* result)
+{
+    if (count != 0) {
+        return GS_EXT_BAD_ARGUMENT;
+    }
+    return guarded([result](Extension& extension) { return extension.bluetoothNode(result); });
+}
+
 int32_t startWith(JobKind kind, uint64_t job, const char* args, size_t size)
 {
     if (args == nullptr && size > 0) {
@@ -198,6 +206,21 @@ int32_t startRename(void*, uint64_t job, const char* args, size_t size)
 int32_t startDiagnose(void*, uint64_t job, const char* args, size_t size)
 {
     return startWith(JobKind::Diagnose, job, args, size);
+}
+
+int32_t startScan(void*, uint64_t job, const char* args, size_t size)
+{
+    return startWith(JobKind::Scan, job, args, size);
+}
+
+int32_t startPair(void*, uint64_t job, const char* args, size_t size)
+{
+    return startWith(JobKind::Pair, job, args, size);
+}
+
+int32_t startUnpair(void*, uint64_t job, const char* args, size_t size)
+{
+    return startWith(JobKind::Unpair, job, args, size);
 }
 
 void cancelRunning(void*, uint64_t job)
@@ -259,6 +282,9 @@ const gs_ext_job kJobs[] = {
     {.size = sizeof(gs_ext_job), .name = "wifi", .context = nullptr, .start = &startWifi, .cancel = &cancelRunning},
     {.size = sizeof(gs_ext_job), .name = "rename", .context = nullptr, .start = &startRename, .cancel = &cancelRunning},
     {.size = sizeof(gs_ext_job), .name = "diagnose", .context = nullptr, .start = &startDiagnose, .cancel = &cancelRunning},
+    {.size = sizeof(gs_ext_job), .name = "scan", .context = nullptr, .start = &startScan, .cancel = &cancelRunning},
+    {.size = sizeof(gs_ext_job), .name = "pair", .context = nullptr, .start = &startPair, .cancel = &cancelRunning},
+    {.size = sizeof(gs_ext_job), .name = "unpair", .context = nullptr, .start = &startUnpair, .cancel = &cancelRunning},
 };
 
 const gs_ext_node kNodes[] = {
@@ -278,6 +304,8 @@ const gs_ext_node kNodes[] = {
      .returns = GS_EXT_TYPE_BOOLEAN, .context = nullptr, .call = &callDisconnect},
     {.size = sizeof(gs_ext_node), .name = "rescan", .params = nullptr, .param_count = 0,
      .returns = GS_EXT_TYPE_BOOLEAN, .context = nullptr, .call = &callRescan},
+    {.size = sizeof(gs_ext_node), .name = "bluetooth", .params = nullptr, .param_count = 0,
+     .returns = GS_EXT_TYPE_JSON, .context = nullptr, .call = &callBluetooth},
 };
 
 const gs_ext_contribution kContributions[] = {
@@ -287,6 +315,9 @@ const gs_ext_contribution kContributions[] = {
     {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_JOB, .name = "wifi", .data = &kJobs[1]},
     {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_JOB, .name = "rename", .data = &kJobs[2]},
     {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_JOB, .name = "diagnose", .data = &kJobs[3]},
+    {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_JOB, .name = "scan", .data = &kJobs[4]},
+    {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_JOB, .name = "pair", .data = &kJobs[5]},
+    {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_JOB, .name = "unpair", .data = &kJobs[6]},
     {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_NODE, .name = "boards", .data = &kNodes[0]},
     {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_NODE, .name = "ports", .data = &kNodes[1]},
     {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_NODE, .name = "firmware", .data = &kNodes[2]},
@@ -295,6 +326,7 @@ const gs_ext_contribution kContributions[] = {
     {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_NODE, .name = "tap", .data = &kNodes[5]},
     {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_NODE, .name = "disconnect", .data = &kNodes[6]},
     {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_NODE, .name = "rescan", .data = &kNodes[7]},
+    {.size = sizeof(gs_ext_contribution), .kind = GS_EXT_KIND_NODE, .name = "bluetooth", .data = &kNodes[8]},
 };
 
 const gs_ext_plugin kPlugin = {

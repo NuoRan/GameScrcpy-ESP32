@@ -60,18 +60,40 @@ esp32::OpenFailure failureOf(esp32::SerialFailure failure) noexcept
 
 bool blocks(const Hold& blocker, const Candidate& candidate) noexcept
 {
-    if (candidate.wifi) {
-        return blocker.wifi;
+    if (candidate.via == esp32::LinkMode::Wifi) {
+        return blocker.via == esp32::LinkMode::Wifi;
     }
-    return covers(blocker, candidate.where, false);
+    return covers(blocker, candidate.where, candidate.via);
 }
 
-bool samePlace(std::string_view where, bool wifi, std::string_view otherWhere, bool otherWifi) noexcept
+bool samePlace(std::string_view where, esp32::LinkMode via, std::string_view otherWhere,
+               esp32::LinkMode otherVia) noexcept
 {
-    if (wifi != otherWifi) {
+    if (via != otherVia) {
         return false;
     }
-    return wifi ? where == otherWhere : samePort(where, otherWhere);
+    switch (via) {
+    case esp32::LinkMode::Wifi:
+        return where == otherWhere;
+    case esp32::LinkMode::Bluetooth:
+        return esp32::sameBluetooth(where, otherWhere);
+    case esp32::LinkMode::Serial:
+        break;
+    }
+    return samePort(where, otherWhere);
+}
+
+std::string_view prefixOf(esp32::LinkMode via) noexcept
+{
+    switch (via) {
+    case esp32::LinkMode::Wifi:
+        return "wifi-";
+    case esp32::LinkMode::Bluetooth:
+        return "ble-";
+    case esp32::LinkMode::Serial:
+        break;
+    }
+    return "serial-";
 }
 
 bool portListed(const std::vector<esp32::SerialPortInfo>& ports, std::string_view where) noexcept
@@ -84,6 +106,22 @@ char lowered(char c) noexcept
     return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 }
 
+bool startsWith(std::string_view text, std::string_view prefix) noexcept
+{
+    return text.size() > prefix.size() && sameResource(text.substr(0, prefix.size()), prefix);
+}
+
+std::vector<std::string> pairedOf(const std::vector<esp32::KnownBoard>& boards)
+{
+    std::vector<std::string> paired;
+    for (const esp32::KnownBoard& board : boards) {
+        if (!board.bluetooth.empty()) {
+            paired.push_back(board.bluetooth);
+        }
+    }
+    return paired;
+}
+
 gs_esp32_touch middleTouch(bool down)
 {
     gs_esp32_touch touch{};
@@ -94,9 +132,9 @@ gs_esp32_touch middleTouch(bool down)
 
 }
 
-std::string boardIdOf(std::string_view where, bool wifi)
+std::string boardIdOf(std::string_view where, esp32::LinkMode via)
 {
-    std::string id = wifi ? "wifi-" : "serial-";
+    std::string id(prefixOf(via));
     for (const char c : where) {
         const char low = lowered(c);
         id.push_back((low >= 'a' && low <= 'z') || (low >= '0' && low <= '9') ? low : '-');
@@ -111,6 +149,21 @@ std::string serialResource(std::string_view where)
 {
     const int number = esp32::portNumber(where);
     return std::string(kSerialPrefix) + (number > 0 ? "COM" + std::to_string(number) : std::string(where));
+}
+
+std::string resourceOf(std::string_view where, esp32::LinkMode via)
+{
+    switch (via) {
+    case esp32::LinkMode::Wifi:
+        return {};
+    case esp32::LinkMode::Bluetooth: {
+        const std::optional<std::uint64_t> address = esp32::parseBluetooth(where);
+        return address ? esp32::bluetoothResource(*address) : std::string(esp32::kBluetoothPrefix) + std::string(where);
+    }
+    case esp32::LinkMode::Serial:
+        break;
+    }
+    return serialResource(where);
 }
 
 bool samePort(std::string_view a, std::string_view b) noexcept
@@ -128,18 +181,32 @@ bool sameResource(std::string_view a, std::string_view b) noexcept
 Hold holdOf(const esp32::Esp32Settings& settings)
 {
     if (settings.link == esp32::LinkMode::Wifi) {
-        return Hold{.where = settings.address, .wifi = true, .every = true};
+        return Hold{.where = settings.address, .via = esp32::LinkMode::Wifi, .every = true};
+    }
+    if (settings.link == esp32::LinkMode::Bluetooth) {
+        const std::optional<std::uint64_t> address = esp32::parseBluetooth(settings.address);
+        return Hold{.where = address ? esp32::bluetoothText(*address) : std::string(),
+                    .via = esp32::LinkMode::Bluetooth,
+                    .every = !address.has_value()};
     }
     const bool automatic = automaticPort(settings.port);
-    return Hold{.where = automatic ? std::string() : settings.port, .wifi = false, .every = automatic};
+    return Hold{.where = automatic ? std::string() : settings.port, .via = esp32::LinkMode::Serial, .every = automatic};
 }
 
-bool covers(const Hold& hold, std::string_view where, bool wifi) noexcept
+bool covers(const Hold& hold, std::string_view where, esp32::LinkMode via) noexcept
 {
-    if (hold.wifi != wifi) {
+    if (hold.via != via) {
         return false;
     }
-    return wifi || hold.every || samePort(hold.where, where);
+    switch (via) {
+    case esp32::LinkMode::Wifi:
+        return true;
+    case esp32::LinkMode::Bluetooth:
+        return hold.every || esp32::sameBluetooth(hold.where, where);
+    case esp32::LinkMode::Serial:
+        break;
+    }
+    return hold.every || samePort(hold.where, where);
 }
 
 std::vector<Candidate> candidatesOf(const esp32::Esp32Settings& settings,
@@ -152,14 +219,34 @@ std::vector<Candidate> candidatesOf(const esp32::Esp32Settings& settings,
         }
     };
     if (settings.link == esp32::LinkMode::Wifi) {
-        add(Candidate{.where = settings.address, .wifi = true, .kind = esp32::PortKind::Other, .chosen = true});
+        add(Candidate{.where = settings.address, .via = esp32::LinkMode::Wifi, .kind = esp32::PortKind::Other, .chosen = true});
+        return candidates;
+    }
+    if (settings.link == esp32::LinkMode::Bluetooth) {
+        if (!settings.address.empty()) {
+            if (const std::optional<std::uint64_t> address = esp32::parseBluetooth(settings.address)) {
+                add(Candidate{.where = esp32::bluetoothText(*address),
+                              .via = esp32::LinkMode::Bluetooth,
+                              .kind = esp32::PortKind::Other,
+                              .chosen = true});
+            }
+            return candidates;
+        }
+        for (const esp32::KnownBoard& board : settings.knownBoards) {
+            if (const std::optional<std::uint64_t> address = esp32::parseBluetooth(board.bluetooth)) {
+                add(Candidate{.where = esp32::bluetoothText(*address),
+                              .via = esp32::LinkMode::Bluetooth,
+                              .kind = esp32::PortKind::Other,
+                              .chosen = false});
+            }
+        }
         return candidates;
     }
     if (!automaticPort(settings.port)) {
         if (!esp32::validPortName(settings.port)) {
             return candidates;
         }
-        Candidate chosen{.where = settings.port, .wifi = false, .kind = esp32::PortKind::Other, .chosen = true};
+        Candidate chosen{.where = settings.port, .via = esp32::LinkMode::Serial, .kind = esp32::PortKind::Other, .chosen = true};
         const auto listed = std::ranges::find_if(
             ports, [&settings](const esp32::SerialPortInfo& port) { return samePort(port.name, settings.port); });
         if (listed != ports.end()) {
@@ -171,7 +258,7 @@ std::vector<Candidate> candidatesOf(const esp32::Esp32Settings& settings,
     }
     for (const esp32::SerialPortInfo& port : ports) {
         if (esp32::probedAutomatically(port.kind)) {
-            add(Candidate{.where = port.name, .wifi = false, .kind = port.kind, .chosen = false});
+            add(Candidate{.where = port.name, .via = esp32::LinkMode::Serial, .kind = port.kind, .chosen = false});
         }
     }
     return candidates;
@@ -181,15 +268,18 @@ Probed probeBoard(const Candidate& candidate, const esp32::Esp32Settings& settin
                   const std::stop_token& stop, esp32::BoardTrouble& trouble)
 {
     trouble = {};
-    if (candidate.wifi) {
-        esp32::Esp32Settings wifi = settings;
-        wifi.link = esp32::LinkMode::Wifi;
-        wifi.address = candidate.where;
-        Expected<esp32::OpenedLink, esp32::OpenFailure> opened = esp32::openBoard(wifi, std::move(events), stop);
+    if (candidate.via != esp32::LinkMode::Serial) {
+        esp32::Esp32Settings remote = settings;
+        remote.link = candidate.via;
+        remote.address = candidate.where;
+        Expected<esp32::OpenedLink, esp32::OpenFailure> opened = esp32::openBoard(remote, std::move(events), stop);
         if (!opened) {
             return makeUnexpected(opened.error());
         }
-        return Probe{.link = std::move(opened->link), .where = opened->where, .wifi = true, .kind = esp32::PortKind::Other};
+        return Probe{.link = std::move(opened->link),
+                     .where = opened->where,
+                     .via = candidate.via,
+                     .kind = esp32::PortKind::Other};
     }
     esp32::SerialFailure failure = esp32::SerialFailure::None;
     std::unique_ptr<esp32::Port> port = esp32::openSerialPort(candidate.where, GS_ESP32_HANDSHAKE_BAUD, failure);
@@ -208,14 +298,23 @@ Probed probeBoard(const Candidate& candidate, const esp32::Esp32Settings& settin
         trouble = link->trouble();
         return makeUnexpected(stop.stop_requested() ? esp32::OpenFailure::Stopped : esp32::OpenFailure::NoAnswer);
     }
-    return Probe{.link = std::move(link), .where = candidate.where, .wifi = false, .kind = candidate.kind};
+    return Probe{.link = std::move(link), .where = candidate.where, .via = esp32::LinkMode::Serial, .kind = candidate.kind};
+}
+
+bool slowLink(const Board& board) noexcept
+{
+    return board.via == esp32::LinkMode::Bluetooth && board.slowTrip.has_value() && *board.slowTrip > kSlowBluetooth;
 }
 
 bool sameShape(const Board& a, const Board& b) noexcept
 {
-    return a.id == b.id && a.where == b.where && a.wifi == b.wifi && a.kind == b.kind && a.info == b.info &&
+    const auto level = [](const Board& board) {
+        return board.signal ? std::optional(esp32::signalLevel(*board.signal)) : std::nullopt;
+    };
+    return a.id == b.id && a.where == b.where && a.via == b.via && a.kind == b.kind && a.info == b.info &&
            a.status == b.status && a.trouble == b.trouble && a.legacy == b.legacy && a.connected == b.connected &&
-           a.held == b.held && a.inSession == b.inSession && a.flashing == b.flashing && a.yieldedTo == b.yieldedTo;
+           a.held == b.held && a.inSession == b.inSession && a.flashing == b.flashing && a.yieldedTo == b.yieldedTo &&
+           level(a) == level(b) && slowLink(a) == slowLink(b);
 }
 
 Fleet::Fleet(FleetHooks hooks, Changed changed)
@@ -315,7 +414,13 @@ void Fleet::setSettings(esp32::Esp32Settings settings)
         const std::scoped_lock lock(m_mutex);
         if (settings.port == m_settings.port && settings.link == m_settings.link &&
             settings.address == m_settings.address) {
+            const bool repaired = settings.link == esp32::LinkMode::Bluetooth &&
+                                  pairedOf(settings.knownBoards) != pairedOf(m_settings.knownBoards);
             m_settings.knownBoards = std::move(settings.knownBoards);
+            m_settings.radio = std::move(settings.radio);
+            if (repaired) {
+                requestScanLocked();
+            }
             return;
         }
         m_settings = std::move(settings);
@@ -387,7 +492,7 @@ std::optional<Board> Fleet::matching(const esp32::Esp32Settings& settings) const
     const std::scoped_lock lock(m_mutex);
     const Entry* chosen = nullptr;
     for (const Entry& entry : m_entries) {
-        if (!covers(wanted, entry.where, entry.wifi)) {
+        if (!covers(wanted, entry.where, entry.via)) {
             continue;
         }
         if (chosen == nullptr || (entry.link != nullptr && chosen->link == nullptr)) {
@@ -428,15 +533,13 @@ Taken Fleet::take(std::string_view id, const std::string& owner, Holder holder)
     {
         const std::scoped_lock lock(m_mutex);
         Entry* entry = entryNamedLocked(id);
-        if (entry == nullptr || entry->link == nullptr || holdOverLocked(entry->where, entry->wifi) != nullptr) {
+        if (entry == nullptr || entry->link == nullptr || holdOverLocked(entry->where, entry->via) != nullptr) {
             return taken;
         }
         syncLocked(*entry);
         taken.link = std::move(entry->link);
-        if (!entry->wifi) {
-            taken.resource = serialResource(entry->where);
-        }
-        m_holds.insert_or_assign(owner, Hold{.where = entry->where, .wifi = entry->wifi, .every = false, .holder = holder});
+        taken.resource = resourceOf(entry->where, entry->via);
+        m_holds.insert_or_assign(owner, Hold{.where = entry->where, .via = entry->via, .every = false, .holder = holder});
         ++m_holdsVersion;
         log::info(kCategory, "ESP32 touch box on {}: handed over to {}", entry->where, owner);
         requestScanLocked();
@@ -452,7 +555,7 @@ void Fleet::hold(const std::string& owner, Hold wanted)
     {
         const std::scoped_lock lock(m_mutex);
         for (Entry& entry : m_entries) {
-            if (entry.link != nullptr && covers(wanted, entry.where, entry.wifi)) {
+            if (entry.link != nullptr && covers(wanted, entry.where, entry.via)) {
                 log::info(kCategory, "ESP32 touch box on {}: handed over to {}", entry.where, owner);
                 dropLinkLocked(entry, dropped);
             }
@@ -482,17 +585,17 @@ void Fleet::release(const std::string& owner, std::chrono::milliseconds delay)
     notify();
 }
 
-bool Fleet::held(std::string_view where, bool wifi) const
+bool Fleet::held(std::string_view where, esp32::LinkMode via) const
 {
     const std::scoped_lock lock(m_mutex);
-    return holdOverLocked(where, wifi) != nullptr;
+    return holdOverLocked(where, via) != nullptr;
 }
 
-bool Fleet::inSession(std::string_view where, bool wifi) const
+bool Fleet::inSession(std::string_view where, esp32::LinkMode via) const
 {
     const std::scoped_lock lock(m_mutex);
-    return std::ranges::any_of(m_holds, [where, wifi](const std::pair<const std::string, Hold>& hold) {
-        return hold.second.holder == Holder::Session && covers(hold.second, where, wifi);
+    return std::ranges::any_of(m_holds, [where, via](const std::pair<const std::string, Hold>& hold) {
+        return hold.second.holder == Holder::Session && covers(hold.second, where, via);
     });
 }
 
@@ -535,15 +638,19 @@ bool Fleet::yield(std::string_view resource, std::string_view by)
         if (!m_probing.empty() && sameResource(m_probing, resource)) {
             return false;
         }
-        const std::string_view where =
-            resource.size() > kSerialPrefix.size() && sameResource(resource.substr(0, kSerialPrefix.size()), kSerialPrefix)
-                ? resource.substr(kSerialPrefix.size())
-                : std::string_view();
-        if (where.empty() || holdOverLocked(where, false) != nullptr) {
+        esp32::LinkMode via = esp32::LinkMode::Serial;
+        std::string_view where;
+        if (startsWith(resource, kSerialPrefix)) {
+            where = resource.substr(kSerialPrefix.size());
+        } else if (startsWith(resource, esp32::kBluetoothPrefix)) {
+            where = resource.substr(esp32::kBluetoothPrefix.size());
+            via = esp32::LinkMode::Bluetooth;
+        }
+        if (where.empty() || holdOverLocked(where, via) != nullptr) {
             return where.empty();
         }
         for (Entry& entry : m_entries) {
-            if (entry.wifi || !samePort(entry.where, where)) {
+            if (!samePlace(entry.where, entry.via, where, via)) {
                 continue;
             }
             ours = ours || entry.link != nullptr;
@@ -551,7 +658,7 @@ bool Fleet::yield(std::string_view resource, std::string_view by)
             entry.yieldedTo = by.empty() ? std::string("?") : std::string(by);
         }
         if (ours) {
-            log::info(kCategory, "the serial port {} was let go to {}", where, by);
+            log::info(kCategory, "{} was let go to {}", resource, by);
             scheduleLocked(m_hooks.retry);
         }
     }
@@ -571,11 +678,11 @@ void Fleet::dismiss(std::string_view id)
         if (entry == nullptr) {
             return;
         }
-        m_dismissed.push_back(Hold{.where = entry->where, .wifi = entry->wifi});
+        m_dismissed.push_back(Hold{.where = entry->where, .via = entry->via});
         log::info(kCategory, "ESP32 touch box on {}: let go until it is plugged in again", entry->where);
         for (std::size_t index = m_entries.size(); index-- > 0;) {
             const Entry& each = m_entries[index];
-            if (dismissedLocked(each.where, each.wifi) && holdOverLocked(each.where, each.wifi) == nullptr) {
+            if (dismissedLocked(each.where, each.via) && holdOverLocked(each.where, each.via) == nullptr) {
                 eraseLocked(index, dropped);
             }
         }
@@ -728,7 +835,7 @@ Fleet::Scan Fleet::scanOnce(const Job& job, const std::stop_token& cancel)
         if (cancel.stop_requested()) {
             return scan;
         }
-        const std::string resource = candidate.wifi ? std::string() : serialResource(candidate.where);
+        const std::string resource = resourceOf(candidate.where, candidate.via);
         if (!resource.empty() && !acquire(resource, false)) {
             log::info(kCategory, "{} is in use by someone else, so it is not asked", candidate.where);
             busy = true;
@@ -741,7 +848,7 @@ Fleet::Scan Fleet::scanOnce(const Job& job, const std::stop_token& cancel)
             m_probing = resource;
         }
         esp32::BoardTrouble trouble;
-        Probed probed = m_hooks.probe(candidate, job.settings, linkEvents(), cancel, trouble);
+        Probed probed = m_hooks.probe(candidate, job.settings, linkEvents(candidate.via), cancel, trouble);
         {
             const std::scoped_lock lock(m_mutex);
             m_probing.clear();
@@ -777,14 +884,19 @@ Fleet::Scan Fleet::scanOnce(const Job& job, const std::stop_token& cancel)
         return scan;
     }
     if (candidatesOf(job.settings, usable, {}).empty()) {
-        scan.problem = automaticPort(job.settings.port) ? esp32::OpenFailure::NoBoard : esp32::OpenFailure::PortMissing;
+        if (job.settings.link == esp32::LinkMode::Bluetooth) {
+            scan.problem = job.settings.address.empty() ? esp32::OpenFailure::NotPaired : esp32::OpenFailure::BadAddress;
+        } else {
+            scan.problem =
+                automaticPort(job.settings.port) ? esp32::OpenFailure::NoBoard : esp32::OpenFailure::PortMissing;
+        }
     } else if (!candidates.empty()) {
         scan.problem = automatic ? (busy ? esp32::OpenFailure::PortBusy : esp32::OpenFailure::NoBoard) : last;
     }
     return scan;
 }
 
-esp32::LinkEvents Fleet::linkEvents() const
+esp32::LinkEvents Fleet::linkEvents(esp32::LinkMode via) const
 {
     const std::shared_ptr<Gate> gate = m_gate;
     const auto changed = [gate] {
@@ -797,6 +909,9 @@ esp32::LinkEvents Fleet::linkEvents() const
     events.state = [changed](esp32::LinkState) { changed(); };
     events.hello = [changed](const esp32::BoardInfo&, const esp32::BoardStatus&) { changed(); };
     events.status = [changed](const esp32::BoardStatus&) { changed(); };
+    if (via == esp32::LinkMode::Bluetooth) {
+        events.roundTrip = [changed](std::chrono::microseconds) { changed(); };
+    }
     return events;
 }
 
@@ -807,9 +922,12 @@ Fleet::Job Fleet::jobLocked() const
     job.generation = m_generation;
     job.holds = m_holdsVersion;
     job.settings = m_settings;
+    if (job.settings.radio == nullptr) {
+        job.settings.radio = m_hooks.radio;
+    }
     for (const Entry& entry : m_entries) {
-        if (entry.link != nullptr || holdOverLocked(entry.where, entry.wifi) != nullptr) {
-            job.blockers.push_back(Hold{.where = entry.where, .wifi = entry.wifi});
+        if (entry.link != nullptr || holdOverLocked(entry.where, entry.via) != nullptr) {
+            job.blockers.push_back(Hold{.where = entry.where, .via = entry.via});
         }
     }
     for (const auto& held : m_holds) {
@@ -875,8 +993,8 @@ void Fleet::settle()
 void Fleet::adoptLocked(Scan& scan, Dropped& dropped)
 {
     const auto drop = [&dropped](Probe& probe) {
-        if (!probe.wifi) {
-            dropped.resources.push_back(serialResource(probe.where));
+        if (std::string resource = resourceOf(probe.where, probe.via); !resource.empty()) {
+            dropped.resources.push_back(std::move(resource));
         }
         if (probe.link != nullptr) {
             dropped.links.push_back(std::shared_ptr<esp32::Esp32Link>(std::move(probe.link)));
@@ -889,15 +1007,15 @@ void Fleet::adoptLocked(Scan& scan, Dropped& dropped)
         return;
     }
     for (Probe& probe : scan.found) {
-        if (holdOverLocked(probe.where, probe.wifi) != nullptr || dismissedLocked(probe.where, probe.wifi)) {
+        if (holdOverLocked(probe.where, probe.via) != nullptr || dismissedLocked(probe.where, probe.via)) {
             drop(probe);
             continue;
         }
-        Entry* entry = entryAtLocked(probe.where, probe.wifi);
+        Entry* entry = entryAtLocked(probe.where, probe.via);
         if (entry == nullptr) {
-            m_entries.push_back(Entry{.id = boardIdOf(probe.where, probe.wifi),
+            m_entries.push_back(Entry{.id = boardIdOf(probe.where, probe.via),
                                       .where = probe.where,
-                                      .wifi = probe.wifi,
+                                      .via = probe.via,
                                       .kind = probe.kind});
             entry = &m_entries.back();
         } else if (entry->link != nullptr) {
@@ -932,15 +1050,17 @@ void Fleet::adoptLocked(Scan& scan, Dropped& dropped)
             });
         }
         if (m_settings.link == esp32::LinkMode::Serial) {
-            std::erase_if(m_dismissed,
-                          [&scan](const Hold& place) { return !place.wifi && !portListed(scan.ports, place.where); });
+            std::erase_if(m_dismissed, [&scan](const Hold& place) {
+                return place.via == esp32::LinkMode::Serial && !portListed(scan.ports, place.where);
+            });
         }
         for (std::size_t index = m_entries.size(); index-- > 0;) {
             const Entry& entry = m_entries[index];
-            if (entry.link != nullptr || holdOverLocked(entry.where, entry.wifi) != nullptr) {
+            if (entry.link != nullptr || holdOverLocked(entry.where, entry.via) != nullptr) {
                 continue;
             }
-            const bool kept = !entry.yieldedTo.empty() && !entry.wifi && portListed(scan.ports, entry.where) &&
+            const bool kept = !entry.yieldedTo.empty() && entry.via == esp32::LinkMode::Serial &&
+                              portListed(scan.ports, entry.where) &&
                               std::ranges::any_of(scan.elsewhere,
                                                   [&entry](const std::string& where) { return samePort(where, entry.where); });
             if (!kept) {
@@ -972,7 +1092,7 @@ void Fleet::refreshLocked(Dropped& dropped)
         syncLocked(entry);
         dropLinkLocked(entry, dropped);
         lost = true;
-        if (holdOverLocked(entry.where, entry.wifi) == nullptr) {
+        if (holdOverLocked(entry.where, entry.via) == nullptr) {
             eraseLocked(index, dropped);
         }
     }
@@ -1007,8 +1127,8 @@ void Fleet::dropLinkLocked(Entry& entry, Dropped& dropped) const
     if (entry.link == nullptr) {
         return;
     }
-    if (!entry.wifi) {
-        dropped.resources.push_back(serialResource(entry.where));
+    if (std::string resource = resourceOf(entry.where, entry.via); !resource.empty()) {
+        dropped.resources.push_back(std::move(resource));
     }
     dropped.links.push_back(std::move(entry.link));
     entry.link.reset();
@@ -1035,10 +1155,11 @@ bool Fleet::wantsRetryLocked() const
     if (!m_started || !m_active) {
         return false;
     }
-    const bool wifiMissing = m_settings.link == esp32::LinkMode::Wifi &&
-                             std::ranges::none_of(m_entries, [](const Entry& entry) { return entry.wifi; });
+    const esp32::LinkMode wanted = m_settings.link;
+    const bool remoteMissing = wanted != esp32::LinkMode::Serial &&
+                               std::ranges::none_of(m_entries, [wanted](const Entry& entry) { return entry.via == wanted; });
     const bool yielded = std::ranges::any_of(m_entries, [](const Entry& entry) { return !entry.yieldedTo.empty(); });
-    return wifiMissing || yielded;
+    return remoteMissing || yielded;
 }
 
 Board Fleet::snapshotLocked(const Entry& entry) const
@@ -1046,7 +1167,7 @@ Board Fleet::snapshotLocked(const Entry& entry) const
     Board board;
     board.id = entry.id;
     board.where = entry.where;
-    board.wifi = entry.wifi;
+    board.via = entry.via;
     board.kind = entry.kind;
     board.info = entry.info;
     board.status = entry.status;
@@ -1058,10 +1179,12 @@ Board Fleet::snapshotLocked(const Entry& entry) const
         board.info = entry.link->board();
         board.status = entry.link->status();
         board.roundTrip = entry.link->roundTrip();
+        board.slowTrip = entry.link->slowRoundTrip();
+        board.signal = entry.link->signal();
         board.legacy = entry.link->state() == esp32::LinkState::Legacy;
         board.trouble = entry.link->trouble();
     }
-    if (const Hold* hold = holdOverLocked(entry.where, entry.wifi)) {
+    if (const Hold* hold = holdOverLocked(entry.where, entry.via)) {
         board.held = true;
         board.inSession = hold->holder == Holder::Session;
         board.flashing = hold->holder == Holder::Flash;
@@ -1069,25 +1192,25 @@ Board Fleet::snapshotLocked(const Entry& entry) const
     return board;
 }
 
-const Hold* Fleet::holdOverLocked(std::string_view where, bool wifi) const
+const Hold* Fleet::holdOverLocked(std::string_view where, esp32::LinkMode via) const
 {
     for (const auto& held : m_holds) {
-        if (covers(held.second, where, wifi)) {
+        if (covers(held.second, where, via)) {
             return &held.second;
         }
     }
     return nullptr;
 }
 
-bool Fleet::dismissedLocked(std::string_view where, bool wifi) const
+bool Fleet::dismissedLocked(std::string_view where, esp32::LinkMode via) const
 {
-    return std::ranges::any_of(m_dismissed, [where, wifi](const Hold& place) { return covers(place, where, wifi); });
+    return std::ranges::any_of(m_dismissed, [where, via](const Hold& place) { return covers(place, where, via); });
 }
 
-Fleet::Entry* Fleet::entryAtLocked(std::string_view where, bool wifi)
+Fleet::Entry* Fleet::entryAtLocked(std::string_view where, esp32::LinkMode via)
 {
     const auto found = std::ranges::find_if(
-        m_entries, [where, wifi](const Entry& entry) { return samePlace(entry.where, entry.wifi, where, wifi); });
+        m_entries, [where, via](const Entry& entry) { return samePlace(entry.where, entry.via, where, via); });
     return found != m_entries.end() ? &*found : nullptr;
 }
 

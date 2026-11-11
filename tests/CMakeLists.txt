@@ -9,8 +9,10 @@ endfunction()
 
 gs_add_unit_test(gs_esp32_tests
     SOURCES
+        unit/esp32/BluetoothTests.cpp
         unit/esp32/ContactSlotsTests.cpp
         unit/esp32/DiagnosisTests.cpp
+        unit/esp32/FakeBluetooth.h
         unit/esp32/FakeBoard.h
         unit/esp32/FakeRom.h
         unit/esp32/FirmwareTests.cpp

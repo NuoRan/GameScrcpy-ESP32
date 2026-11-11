@@ -5,6 +5,7 @@
 #include "gs/touchbox/Plugin.h"
 #include "gs/touchbox/Texts.h"
 
+#include <gs/esp32/Bluetooth.h>
 #include <gs/esp32/Boards.h>
 #include <gs/esp32/TouchMethod.h>
 #include <gs/espflash/Firmware.h>
@@ -25,7 +26,7 @@
 
 namespace gs::touchbox {
 
-enum class JobKind : std::uint8_t { Flash, Wifi, Rename, Diagnose };
+enum class JobKind : std::uint8_t { Flash, Wifi, Rename, Diagnose, Scan, Pair, Unpair };
 
 class Extension final
 {
@@ -54,6 +55,7 @@ public:
     [[nodiscard]] std::int32_t tapNode(std::string_view device, gs_ext_result* result);
     [[nodiscard]] std::int32_t disconnectNode(std::string_view device, gs_ext_result* result);
     [[nodiscard]] std::int32_t rescanNode(gs_ext_result* result);
+    [[nodiscard]] std::int32_t bluetoothNode(gs_ext_result* result);
 
     [[nodiscard]] std::int32_t startJob(JobKind kind, std::uint64_t job, std::string_view args);
     void cancelJob(std::uint64_t job);
@@ -104,6 +106,13 @@ private:
     void runWifi(std::uint64_t job, const std::string& device, const std::string& ssid, const std::string& password);
     void runRename(std::uint64_t job, const std::string& device, const std::string& name);
     void runDiagnose(std::uint64_t job, const std::string& device, const std::stop_token& stop);
+    void runScan(std::uint64_t job, const std::stop_token& stop);
+    void runPair(std::uint64_t job, const std::string& device, const std::stop_token& stop);
+    void runUnpair(std::uint64_t job, const std::string& device);
+    [[nodiscard]] std::optional<esp32::SeenBoard> lookFor(std::string_view id, std::uint64_t job, double from,
+                                                         const std::stop_token& stop);
+    [[nodiscard]] bool usable(std::uint64_t job) const;
+    [[nodiscard]] std::string bluetoothJson() const;
     void reapJobs();
 
     const Host m_host;
@@ -119,6 +128,8 @@ private:
     std::mutex m_jobsMutex;
     std::map<std::uint64_t, std::unique_ptr<Running>> m_jobs;
     bool m_stopping = false;
+    std::atomic<int> m_scans{0};
+    std::shared_ptr<esp32::BleRadio> m_radio;
     std::unique_ptr<Fleet> m_fleet;
 };
 

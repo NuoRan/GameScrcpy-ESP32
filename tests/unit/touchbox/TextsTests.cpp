@@ -90,14 +90,40 @@ TEST_CASE("ADR-0112: the phone, Wi-Fi, flashing and opening texts follow the boa
           std::string::npos);
     CHECK(gs::touchbox::flashFailureText(espflash::FlashFailure::NoFirmware, Language::English).find("extension") !=
           std::string::npos);
-    CHECK(gs::touchbox::openFailureText(esp32::OpenFailure::NoBoard, true, Language::English).find("Wi-Fi") !=
-          std::string::npos);
-    CHECK(gs::touchbox::openFailureText(esp32::OpenFailure::NoBoard, false, Language::English).find("serial port") !=
-          std::string::npos);
-    CHECK(gs::touchbox::openFailureText(esp32::OpenFailure::Stopped, false, Language::English).empty());
+    CHECK(gs::touchbox::openFailureText(esp32::OpenFailure::NoBoard, esp32::LinkMode::Wifi, Language::English)
+              .find("Wi-Fi") != std::string::npos);
+    CHECK(gs::touchbox::openFailureText(esp32::OpenFailure::NoBoard, esp32::LinkMode::Serial, Language::English)
+              .find("serial port") != std::string::npos);
+    CHECK(gs::touchbox::openFailureText(esp32::OpenFailure::Stopped, esp32::LinkMode::Serial, Language::English)
+              .empty());
 
     CHECK(gs::touchbox::arg("%1 and %2", "keys", "mouse") == "keys and mouse");
     CHECK(gs::touchbox::arg("no marker", "x") == "no marker");
     CHECK(gs::touchbox::languageCode(Language::Chinese) == "zh_CN");
     CHECK(gs::touchbox::languageCode(Language::English) == "en");
+}
+
+TEST_CASE("ADR-0112: the Bluetooth texts say what to do when the radio, the pairing or the key is missing")
+{
+    const auto failure = [](esp32::OpenFailure problem, Language language) {
+        return gs::touchbox::openFailureText(problem, esp32::LinkMode::Bluetooth, language);
+    };
+    CHECK(failure(esp32::OpenFailure::NoBoard, Language::English).find("Bluetooth") != std::string::npos);
+    CHECK(failure(esp32::OpenFailure::NoKey, Language::English).find("USB") != std::string::npos);
+    CHECK(failure(esp32::OpenFailure::NoAnswer, Language::English).find("1.1") != std::string::npos);
+    CHECK(failure(esp32::OpenFailure::NoBluetooth, Language::Chinese) == "这台电脑没有低功耗蓝牙，或者蓝牙已关闭。");
+    CHECK(failure(esp32::OpenFailure::NotPaired, Language::English).find("Pair one") != std::string::npos);
+    CHECK(gs::touchbox::openFailureText(esp32::OpenFailure::NoKey, esp32::LinkMode::Wifi, Language::English)
+              .find("Wi-Fi") != std::string::npos);
+
+    CHECK(gs::touchbox::signalText(-60, Language::English) == "Signal good (-60 dBm)");
+    CHECK(gs::touchbox::signalText(-72, Language::Chinese) == "信号一般（-72 dBm）");
+    CHECK(gs::touchbox::slowBluetoothText(Language::Chinese) == "蓝牙延迟较高");
+    CHECK(gs::touchbox::slowBluetoothText(Language::English) == "Bluetooth delay is high");
+    CHECK(gs::touchbox::bluetoothStateText(esp32::BluetoothState::Off, Language::English).find("Windows") !=
+          std::string::npos);
+    CHECK_FALSE(gs::touchbox::bluetoothStateText(esp32::BluetoothState::Missing, Language::English).empty());
+    CHECK(gs::touchbox::pairFailureText(esp32::PairOutcome::Refused, Language::English).find("Windows") !=
+          std::string::npos);
+    CHECK(gs::touchbox::pairFailureText(esp32::PairOutcome::Failed, Language::Chinese) == "配对没有成功，请再试一次。");
 }
