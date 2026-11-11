@@ -81,30 +81,26 @@ type FlashState = {
 
 type Note = { text: string; failed: boolean };
 
-interface Extensions {
-    community: {
-        esp32: {
-            boards(): Board[];
-            ports(): SerialPort[];
-            firmware(): Firmware;
-            problem(): string;
-            language(): string;
-            tap(device: string): boolean;
-            disconnect(device: string): boolean;
-            rescan(): boolean;
-            bluetooth(): Radio;
-            flash(args: { device: string }): ExtensionJob<StoreValue>;
-            wifi(args: { device: string; ssid: string; password: string }): ExtensionJob<StoreValue>;
-            rename(args: { device: string; name: string }): ExtensionJob<StoreValue>;
-            diagnose(args: { device: string }): ExtensionJob<StoreValue>;
-            scan(args: Record<string, never>): ExtensionJob<StoreValue>;
-            pair(args: { device: string }): ExtensionJob<StoreValue>;
-            unpair(args: { device: string }): ExtensionJob<StoreValue>;
-        };
-    };
-}
+type Esp32 = {
+    boards(): Board[];
+    ports(): SerialPort[];
+    firmware(): Firmware;
+    problem(): string;
+    language(): string;
+    tap(device: string): boolean;
+    disconnect(device: string): boolean;
+    rescan(): boolean;
+    bluetooth(): Radio;
+    flash(args: { device: string }): ExtensionJob<StoreValue>;
+    wifi(args: { device: string; ssid: string; password: string }): ExtensionJob<StoreValue>;
+    rename(args: { device: string; name: string }): ExtensionJob<StoreValue>;
+    diagnose(args: { device: string }): ExtensionJob<StoreValue>;
+    scan(args: Record<string, never>): ExtensionJob<StoreValue>;
+    pair(args: { device: string }): ExtensionJob<StoreValue>;
+    unpair(args: { device: string }): ExtensionJob<StoreValue>;
+};
 
-const box = ext.community.esp32;
+const box = ext.community.esp32 as Esp32;
 
 const english = {
     intro: "Plug the board's serial port into this computer, or set up its Wi-Fi once. Each phone picks the board in its own settings of this extension.",
