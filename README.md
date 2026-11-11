@@ -2,19 +2,21 @@
 
 [English](README.en.md)
 
-把一块 ESP32 开发板变成手机的“外接触摸屏 + 键盘 + 鼠标 + 手柄”：板子经 USB 或蓝牙插进手机，电脑上的 [GameScrcpy](https://github.com/NuoRan/GameScrcpy) 经串口或 Wi-Fi 把触控发给板子，手机不需要打开 USB 调试。这个仓库是 GameScrcpy 的社区扩展 `community.esp32`，作者“GameScrcpy 社区”，以 Apache-2.0 许可发布。它原是 GameScrcpy 2.0 内置的 ESP32 触控盒，现在只用 GameScrcpy 公开的扩展接口。
+把一块 ESP32 开发板变成手机的“外接触摸屏 + 键盘 + 鼠标 + 手柄”：板子经 USB 或蓝牙插进手机，电脑上的 [GameScrcpy](https://github.com/NuoRan/GameScrcpy) 经串口、Wi-Fi 或蓝牙把触控发给板子，手机不需要打开 USB 调试。这个仓库是 GameScrcpy 的社区扩展 `community.esp32`，作者“GameScrcpy 社区”，以 Apache-2.0 许可发布。它原是 GameScrcpy 2.0 内置的 ESP32 触控盒，现在只用 GameScrcpy 公开的扩展接口。
 
 ## 需要什么
 
 - Windows 10 / 11（x64）上的 GameScrcpy 2.1 或更新的版本（扩展接口 ABI 2：长任务、设备提供者、事件、设置、硬件占用、设备与扩展设置里的面板、扩展的帮助）。
 - 一块 ESP32-S3、S2、P4（USB 接手机）或经典 ESP32、C3、C6（蓝牙接手机）开发板，至少 4 MB 闪存。
+- 电脑经蓝牙连板子时：这台电脑要有低功耗蓝牙（自带或 USB 适配器），板子是经典 ESP32、C3、C6 或 S3，固件 1.1 或更新。
 
 ## 安装与使用
 
-1. 下载 `community.esp32-<版本>.gsext`，在 GameScrcpy 的“扩展”页选“从文件安装”，同意它要的权限：使用你选的设备（串口与刷写）、在设备页加设备、使用网络（只用于局域网里经 Wi-Fi 找板子）。
-2. 把板子的串口接到电脑。扩展找到它后，它作为“触控盒”出现在“设备”页：“控制”不看画面直接操作手机，“设置”打开这块板子的窗口（试一下、固件、Wi-Fi、名称、诊断），“更多”里有刷写固件、诊断和断开。
-3. 想让投屏中的手机经板子触控：在那台手机的设置里把触控方式选成 ESP32，并在这个扩展的手机设置里选串口（auto 或 COM7 这样的串口）或 Wi-Fi 与地址。
+1. 下载 `community.esp32-<版本>.gsext`，在 GameScrcpy 的“扩展”页选“从文件安装”，同意它要的权限：使用你选的设备（串口、蓝牙与刷写）、在设备页加设备、使用网络（只用于局域网里经 Wi-Fi 找板子）。
+2. 把板子的串口接到电脑。扩展找到它后，它作为“触控盒”出现在“设备”页：“控制”不看画面直接操作手机，“设置”打开这块板子的窗口（试一下、固件、Wi-Fi、蓝牙、名称、诊断），“更多”里有刷写固件、诊断和断开。
+3. 想让投屏中的手机经板子触控：在那台手机的设置里把触控方式选成 ESP32，并在这个扩展的手机设置里选串口（auto 或 COM7 这样的串口）、Wi-Fi 或蓝牙，以及地址。
 4. 新板子或旧固件的板子：在扩展卡片的“设置”里选它的串口点“刷写固件”。
+5. 想让电脑经蓝牙连板子、不接数据线：板子接在串口上时，在它的窗口里点“经蓝牙配对”，再把连接方式选成蓝牙。经蓝牙连着的板子在设备页显示蓝牙图标和信号；每一百次往返里最慢那次超过 30 毫秒时，它的窗口提示“蓝牙延迟较高”。
 
 详细说明（接线、什么时候按 BOOT、各种提示的意思）在程序“帮助”页的“扩展”一组里，原文是 [docs/help/esp32.zh_CN.md](docs/help/esp32.zh_CN.md)。
 
@@ -30,7 +32,7 @@
 |---|---|
 | `extension/` | 扩展清单 `manifest.json`、画面板的脚本 `scripts/panel.ts`、图标 |
 | `native/support` | 从 GameScrcpy 的 `gs::base` / `gs::platform` 留下的精简部分：`Expected`、日志、串口与 UDP 用到的 Win32 小工具 |
-| `native/esp32` | 板子的协议链路：串口、UDP、mDNS 查找、触点分槽、按键、诊断（原 GameScrcpy `src/esp32`） |
+| `native/esp32` | 板子的协议链路：串口、UDP、低功耗蓝牙（WinRT GATT）、mDNS 查找、触点分槽、按键、诊断（原 GameScrcpy `src/esp32`） |
 | `native/espflash` | 按乐鑫公开的串口下载协议刷写固件（原 GameScrcpy `src/espflash`） |
 | `native/touchbox` | 扩展本身：找板子、触控方式、设备提供者、长任务、节点、事件，以及导出 `gs_ext_main` 的 `esp32.dll` |
 | `firmware/` | ESP-IDF v6.1 固件工程与编好的镜像 `release/`（原 GameScrcpy `firmware/esp32`） |
@@ -65,10 +67,11 @@ $env:GS_HOME = 'C:\Program Files\GameScrcpy'
 ## 用 `gs ext test` 跑场景
 
 ```powershell
-& "$env:GS_HOME\gs.exe" ext test build\msvc-release\package
+$tests = Get-ChildItem tests\extension\*.json | ForEach-Object { '--test'; $_.FullName }
+& "$env:GS_HOME\gs.exe" ext test build\msvc-release\package @tests
 ```
 
-`tests/extension/` 里的场景不需要真板子；`touch-fake-board-over-wifi.json` 要先在另一个窗口运行 `python tools\fake_esp32.py --port 45455 --phone usb --phone-delay 0`。场景的格式（`gamescrcpy.ext-test` 第 1 版）跟着 GameScrcpy 的 `gs ext test` 走，以 GameScrcpy 文档为准。
+扩展包里不带测试，所以每个场景用一个 `--test` 交给 `gs ext test`。场景不需要真板子，也不会让电脑的蓝牙去搜索；串口设成不存在的 `COM250` 或连接方式设成蓝牙，结果不受电脑上插着什么影响。格式是 GameScrcpy 的 `gamescrcpy.ext-test` 第 1 版：每个场景一个 JSON，可以写 `settings`、`deviceSettings`（手机叫 `mock-phone`）、`holders` 与 `timeout`；`steps` 里每一步用 `do` 写动作（`call`、`job`、`touch.open`、`devices`、`device.act`、`settings`、`holder`、`claim.want`、`claims` 等），用 `expect` 写要核对的结果。每个场景从空的存储开始，放不进板子的密钥，所以原来经 Wi-Fi 连假板子（`tools/fake_esp32.py`）的场景去掉了，链路由 `tests/unit` 里的假板子测试。
 
 ## 给逻辑与面板用的接口
 
@@ -76,7 +79,8 @@ $env:GS_HOME = 'C:\Program Files\GameScrcpy'
 
 | 名字 | 种类 | 说明 |
 |---|---|---|
-| `boards()` | 节点 → json | 找到的板子：编号、状态、芯片、固件、手机、Wi-Fi、往返延迟、能否升级 |
+| `boards()` | 节点 → json | 找到的板子：编号、状态、连接方式、芯片、固件、手机、Wi-Fi、往返延迟、蓝牙信号与最慢往返、能否升级 |
+| `bluetooth()` | 节点 → json | 这台电脑的蓝牙状态、最近在附近看到的板子（地址、芯片、信号、有没有密钥、是否配对、是否连着）、经蓝牙配对过的板子 |
 | `ports()` | 节点 → json | 这台电脑的串口：名字、标题、种类、像不像板子 |
 | `firmware()` | 节点 → json | 自带的固件：版本与有镜像的芯片 |
 | `problem()` | 节点 → string | 上一次查找为什么没找到板子 |
@@ -86,8 +90,11 @@ $env:GS_HOME = 'C:\Program Files\GameScrcpy'
 | `wifi({ device, ssid, password })` | 长任务 | 经串口设置 Wi-Fi；`ssid` 为空则忘记 Wi-Fi |
 | `rename({ device, name })` | 长任务 | 给板子改名（1～32 字节） |
 | `diagnose({ device })` | 长任务 | 询问板子或串口，说明哪里不对 |
+| `scan({})` | 长任务 | 经蓝牙查找附近的板子六秒，结果与 `bluetooth()` 相同 |
+| `pair({ device })` | 长任务 | 经蓝牙配对：`device` 是接在 USB 上的板子（先交给它密钥）、这台电脑有密钥的板子编号，或附近板子的蓝牙地址 |
+| `unpair({ device })` | 长任务 | 从 Windows 和扩展里删除蓝牙配对，密钥留给 Wi-Fi；`device` 是板子编号或蓝牙地址 |
 
-事件（`events.on(主题, ({ value }) => …)`）：`board.added`、`board.changed`、`board.removed`、`ports.changed`、`flash.progress`、`flash.done`、`board.diagnosed`。
+事件（`events.on(主题, ({ value }) => …)`）：`board.added`、`board.changed`、`board.removed`、`ports.changed`、`flash.progress`、`flash.done`、`board.diagnosed`、`bluetooth.changed`。
 
 ## 固件与协议
 
@@ -96,6 +103,6 @@ $env:GS_HOME = 'C:\Program Files\GameScrcpy'
 
 ## 还没做的
 
-- 电脑经蓝牙连板子（BLE 串口服务）：固件与扩展都要加，链路层已经为第三种连接方式留好了位置。
+- `firmware/release/` 里的镜像还是 1.0.2：要装好 ESP-IDF v6.1 后用 `tools\build_firmware.ps1` 按 1.1.0 的源码重新编译，扩展带的固件才有电脑用的蓝牙服务。
 
 发布地址由维护者发布时补上。

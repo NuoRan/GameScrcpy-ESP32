@@ -4,7 +4,9 @@ type Board = {
     id: string;
     name: string;
     where: string;
+    via: "serial" | "wifi" | "ble";
     wifi: boolean;
+    bluetooth: boolean;
     state: BoardState;
     stateText: string;
     summary: string;
@@ -18,16 +20,48 @@ type Board = {
     firmware: string | null;
     boardName: string | null;
     hasWifi: boolean;
+    hasBluetoothLink: boolean;
     parts: string;
     phone: string;
     wifiText: string;
     wifiConfigured: boolean;
     address: string | null;
     roundTripMs: number | null;
+    slowTripMs: number | null;
+    slowBluetooth: boolean;
+    slowText: string;
+    signal: number | null;
+    signalText: string;
     problem: string;
     bundled: string | null;
     upgradable: boolean;
 };
+
+type NearbyBoard = {
+    address: string;
+    id: string;
+    name: string;
+    chip: string;
+    signal: number;
+    signalText: string;
+    keyed: boolean;
+    busy: boolean;
+    known: boolean;
+    paired: boolean;
+    connected: boolean;
+};
+
+type PairedBoard = { id: string; name: string; address: string };
+
+type Radio = {
+    state: "missing" | "off" | "ready" | "unknown";
+    stateText: string;
+    scanning: boolean;
+    boards: NearbyBoard[];
+    paired: PairedBoard[];
+};
+
+type Work = { device: string; running: boolean; fraction: number; text: string };
 
 type SerialPort = { name: string; title: string; kind: string; likely: boolean };
 
@@ -58,10 +92,14 @@ interface Extensions {
             tap(device: string): boolean;
             disconnect(device: string): boolean;
             rescan(): boolean;
+            bluetooth(): Radio;
             flash(args: { device: string }): ExtensionJob<StoreValue>;
             wifi(args: { device: string; ssid: string; password: string }): ExtensionJob<StoreValue>;
             rename(args: { device: string; name: string }): ExtensionJob<StoreValue>;
             diagnose(args: { device: string }): ExtensionJob<StoreValue>;
+            scan(args: Record<string, never>): ExtensionJob<StoreValue>;
+            pair(args: { device: string }): ExtensionJob<StoreValue>;
+            unpair(args: { device: string }): ExtensionJob<StoreValue>;
         };
     };
 }
@@ -81,6 +119,7 @@ const english = {
     flash: "Flash firmware",
     upgrade: "Upgrade firmware",
     bootHint: "If it says the board did not enter download mode: hold BOOT while plugging in the cable, then flash again.",
+    flashSerialOnly: "Firmware is flashed over the serial port: connect the board with its cable first.",
     flashSteps: ["Prepare", "Download mode", "Write", "Check", "Restart"],
     chip: "Chip",
     version: "Firmware",
@@ -115,6 +154,29 @@ const english = {
     diagnosisGroup: "Diagnosis",
     diagnose: "Diagnose",
     healthy: "The board answers and works.",
+    bluetoothGroup: "Bluetooth",
+    bluetoothIntro:
+        "With firmware 1.1 or later, a classic ESP32, C3, C6 or S3 board can reach this computer over Bluetooth instead of the cable. Pair it once from its page while it is plugged in by USB, or below when this computer already has its key.",
+    lookForBoards: "Look for boards",
+    noneNearby: "No board was found nearby. Keep the board on and near this computer, then look again.",
+    needsKey: "A board marked No key has not met this computer yet: plug it in by USB and pair it from its page.",
+    pair: "Pair",
+    forgetPairing: "Forget pairing",
+    paired: "Paired",
+    notPaired: "Not paired",
+    noKey: "No key",
+    inUse: "Connected",
+    busyElsewhere: "In use",
+    notNearby: "Not nearby",
+    pairedDone: "Paired. Choose Bluetooth as the ESP32 connection in the phone's settings of this extension.",
+    unpaired: "The pairing is forgotten.",
+    viaBluetooth: "Bluetooth",
+    slowTrip: "Slowest 1 in 100",
+    pairIntro: "Pair this board with this computer over Bluetooth so the phone can use it without the cable. It gets its key over the cable first.",
+    pairBoard: "Pair over Bluetooth",
+    bluetoothLinked: "This board reaches this computer over Bluetooth.",
+    noBluetoothLink: "This firmware cannot reach a computer over Bluetooth. Flash firmware 1.1 or later; the ESP32-S2 has no Bluetooth.",
+    pairSerialOnly: "Pairing starts over the serial port: connect the board with its cable first, or pair it from the boards found over Bluetooth on the Extensions page.",
     help: "Wiring, flashing and the messages are explained in the help article ESP32 touch box.",
 };
 
@@ -131,6 +193,7 @@ const chinese: typeof english = {
     flash: "刷写固件",
     upgrade: "升级固件",
     bootHint: "如果提示开发板没有进入下载模式：按住 BOOT 再插上数据线，然后重新刷写。",
+    flashSerialOnly: "固件要经串口刷写：请先用数据线连上开发板。",
     flashSteps: ["准备", "下载模式", "写入", "校验", "重启"],
     chip: "芯片",
     version: "固件",
@@ -165,6 +228,29 @@ const chinese: typeof english = {
     diagnosisGroup: "诊断",
     diagnose: "诊断",
     healthy: "开发板有应答，工作正常。",
+    bluetoothGroup: "蓝牙",
+    bluetoothIntro:
+        "装了 1.1 或更新固件的经典 ESP32、C3、C6、S3 开发板可以经蓝牙连这台电脑，不用数据线。开发板经 USB 接着时在它的页面配对一次；这台电脑已有它的密钥时也可以在下面配对。",
+    lookForBoards: "查找开发板",
+    noneNearby: "附近没有找到开发板。让开发板保持通电、靠近这台电脑，再找一次。",
+    needsKey: "标着“没有密钥”的开发板还没见过这台电脑：先经 USB 接上，在它的页面配对。",
+    pair: "配对",
+    forgetPairing: "忘记配对",
+    paired: "已配对",
+    notPaired: "未配对",
+    noKey: "没有密钥",
+    inUse: "已连接",
+    busyElsewhere: "使用中",
+    notNearby: "不在附近",
+    pairedDone: "已配对。在这台手机的扩展设置里把 ESP32 连接方式选为蓝牙。",
+    unpaired: "已忘记配对。",
+    viaBluetooth: "蓝牙",
+    slowTrip: "最慢的百分之一",
+    pairIntro: "让这块开发板经蓝牙与这台电脑配对，手机就能不接数据线使用它。开发板会先经数据线拿到密钥。",
+    pairBoard: "经蓝牙配对",
+    bluetoothLinked: "这块开发板经蓝牙连着这台电脑。",
+    noBluetoothLink: "这个固件还不能经蓝牙连电脑。请刷入 1.1 或更新的固件；ESP32-S2 没有蓝牙。",
+    pairSerialOnly: "配对要从串口开始：请先用数据线连上开发板，或者在扩展页从经蓝牙找到的开发板里配对。",
     help: "接线、刷写与各种提示的意思见帮助文章“ESP32 触控盒”。",
 };
 
@@ -184,6 +270,12 @@ let tapNote: Note | null = null;
 let wifiNote: Note | null = null;
 let renameNote: Note | null = null;
 let diagnosis: { device: string; ok: boolean; text: string; rows: { key: string; value: string }[] } | null = null;
+const idle: Work = { device: "", running: false, fraction: 0, text: "" };
+let scan: Work = idle;
+let scanned = false;
+let pairing: Work = idle;
+let bluetoothNote: Note | null = null;
+let pairNote: Note | null = null;
 
 function safely<T>(work: () => T, fallback: T): T {
     try {
@@ -230,6 +322,21 @@ function portsNow(): SerialPort[] {
     return Array.isArray(listed) ? listed : [];
 }
 
+function radioNow(): Radio {
+    const found = safely<Radio | null>(() => box.bluetooth(), null);
+    if (found === null || typeof found !== "object" || !Array.isArray(found.boards) || !Array.isArray(found.paired)) {
+        return { state: "unknown", stateText: "", scanning: false, boards: [], paired: [] };
+    }
+    return found;
+}
+
+function workNodes(work: Work): UiNode[] {
+    if (!work.running) {
+        return [];
+    }
+    return [{ type: "progress", title: work.text, value: work.fraction >= 0 ? work.fraction : null }];
+}
+
 function stepOf(stage: string): number {
     switch (stage) {
         case "preparing":
@@ -270,6 +377,85 @@ function flashNodes(matches: boolean): UiNode[] {
     } else {
         nodes.push({ type: "text", text: flash.text, tone: flash.failed ? "bad" : "good" });
     }
+    return nodes;
+}
+
+function nearbyText(board: NearbyBoard): string {
+    if (board.connected) {
+        return say.inUse;
+    }
+    if (board.paired) {
+        return say.paired;
+    }
+    if (board.busy) {
+        return say.busyElsewhere;
+    }
+    return board.known && board.keyed ? say.notPaired : say.noKey;
+}
+
+function bluetoothNodes(): UiNode[] {
+    const radio = radioNow();
+    const nodes: UiNode[] = [{ type: "text", text: say.bluetoothIntro, style: "caption", tone: "muted" }];
+    if (radio.state === "missing" || radio.state === "off") {
+        nodes.push({ type: "text", text: radio.stateText, tone: "warn" });
+        nodes.push(...noteNode(bluetoothNote));
+        return nodes;
+    }
+    const busy = scan.running || pairing.running;
+    for (const board of radio.boards) {
+        nodes.push({
+            type: "deviceItem",
+            title: board.name,
+            subtitle: [board.chip, board.address, board.signalText].filter((part) => part !== "").join(" · "),
+            icon: "bluetooth",
+            state: board.connected || board.paired ? "ready" : board.busy ? "busy" : "offline",
+            stateText: nearbyText(board),
+        });
+        if (board.paired) {
+            nodes.push({
+                type: "row",
+                children: [{ type: "button", id: "unpair:" + board.address, title: say.forgetPairing, enabled: !busy }],
+            });
+        } else if (board.known && board.keyed) {
+            nodes.push({
+                type: "row",
+                children: [{ type: "button", id: "pair:" + board.address, title: say.pair, style: "primary", enabled: !busy }],
+            });
+        }
+    }
+    const nearby = new Set(radio.boards.map((board) => board.address));
+    for (const board of radio.paired) {
+        if (nearby.has(board.address)) {
+            continue;
+        }
+        nodes.push({
+            type: "deviceItem",
+            title: board.name !== "" ? board.name : board.id,
+            subtitle: board.address,
+            icon: "bluetooth",
+            state: "offline",
+            stateText: say.notNearby,
+        });
+        nodes.push({
+            type: "row",
+            children: [{ type: "button", id: "unpair:" + board.address, title: say.forgetPairing, enabled: !busy }],
+        });
+    }
+    if (scanned && !scan.running && radio.boards.length === 0) {
+        nodes.push({ type: "text", text: say.noneNearby, tone: "muted" });
+    }
+    if (radio.boards.some((board) => !board.paired && !(board.known && board.keyed))) {
+        nodes.push({ type: "text", text: say.needsKey, style: "caption", tone: "muted" });
+    }
+    nodes.push(...workNodes(scan));
+    if (pairing.device !== shownBoard) {
+        nodes.push(...workNodes(pairing));
+    }
+    nodes.push({
+        type: "row",
+        children: [{ type: "button", id: "bleScan", title: say.lookForBoards, icon: "bluetooth", enabled: !busy }],
+    });
+    nodes.push(...noteNode(bluetoothNote));
     return nodes;
 }
 
@@ -332,6 +518,7 @@ function renderMain(): void {
         children: [
             { type: "text", text: say.intro, style: "caption", tone: "muted" },
             { type: "group", title: say.boards, children: boardNodes },
+            { type: "group", title: say.bluetoothGroup, children: bluetoothNodes() },
             { type: "group", title: say.firmware, children: firmwareNodes },
             { type: "text", text: say.help, style: "caption", tone: "muted" },
         ],
@@ -346,6 +533,49 @@ function firmwareLine(board: Board): string {
         return filled(say.available, board.firmware, board.bundled);
     }
     return board.bundled !== null && board.firmware === board.bundled ? filled(say.upToDate, board.firmware) : board.firmware;
+}
+
+function whereText(board: Board): string {
+    if (board.bluetooth) {
+        const where = say.viaBluetooth + " " + board.where;
+        return board.signalText !== "" ? where + " · " + board.signalText : where;
+    }
+    return board.wifi ? "Wi-Fi " + board.where : board.where;
+}
+
+function bluetoothSheetNodes(board: Board, usable: boolean): UiNode[] {
+    const nodes: UiNode[] = [];
+    if (board.bluetooth) {
+        nodes.push({ type: "text", text: say.bluetoothLinked, style: "caption", tone: "muted" });
+        nodes.push({
+            type: "row",
+            children: [{ type: "button", id: "unpair", title: say.forgetPairing, style: "danger", enabled: !pairing.running }],
+        });
+    } else if (board.wifi) {
+        nodes.push({ type: "text", text: say.pairSerialOnly, style: "caption", tone: "muted" });
+    } else if (board.legacy || (board.chip !== null && !board.hasBluetoothLink)) {
+        nodes.push({ type: "text", text: say.noBluetoothLink, style: "caption", tone: "muted" });
+    } else {
+        nodes.push({ type: "text", text: say.pairIntro, style: "caption", tone: "muted" });
+        nodes.push({
+            type: "row",
+            children: [
+                {
+                    type: "button",
+                    id: "pair",
+                    title: say.pairBoard,
+                    icon: "bluetooth",
+                    style: "primary",
+                    enabled: usable && !pairing.running,
+                },
+            ],
+        });
+    }
+    if (pairing.device === board.id) {
+        nodes.push(...workNodes(pairing));
+    }
+    nodes.push(...noteNode(pairNote));
+    return nodes;
 }
 
 function renderBoard(): void {
@@ -366,7 +596,7 @@ function renderBoard(): void {
     if (version !== "") {
         rows.push({ key: say.version, value: version });
     }
-    rows.push({ key: say.where, value: board.wifi ? "Wi-Fi " + board.where : board.where });
+    rows.push({ key: say.where, value: whereText(board) });
     if (board.phone !== "") {
         rows.push({ key: say.phone, value: board.phone });
     }
@@ -379,9 +609,15 @@ function renderBoard(): void {
     if (board.roundTripMs !== null) {
         rows.push({ key: say.roundTrip, value: filled(say.milliseconds, board.roundTripMs.toFixed(1)) });
     }
+    if (board.bluetooth && board.slowTripMs !== null) {
+        rows.push({ key: say.slowTrip, value: filled(say.milliseconds, board.slowTripMs.toFixed(1)) });
+    }
     const children: UiNode[] = [{ type: "keyValue", rows }];
     if (board.stateText !== "" && board.state !== "ready") {
         children.push({ type: "text", text: board.stateText, tone: board.state === "problem" ? "warn" : "muted" });
+    }
+    if (board.slowBluetooth && board.slowText !== "") {
+        children.push({ type: "text", text: board.slowText, tone: "warn" });
     }
     if (board.problem !== "") {
         children.push({ type: "text", text: board.problem, style: "caption", tone: "warn" });
@@ -396,8 +632,8 @@ function renderBoard(): void {
     children.push(...noteNode(tapNote));
     const flashing = flash.running && (flash.device === board.id || flash.port === board.where);
     const firmwareChildren: UiNode[] = [];
-    if (board.wifi) {
-        firmwareChildren.push({ type: "text", text: say.wifiSerialOnly, style: "caption", tone: "muted" });
+    if (board.via !== "serial") {
+        firmwareChildren.push({ type: "text", text: say.flashSerialOnly, style: "caption", tone: "muted" });
     } else {
         firmwareChildren.push({
             type: "button",
@@ -410,7 +646,7 @@ function renderBoard(): void {
     firmwareChildren.push(...flashNodes(flash.device === board.id || flash.port === board.where));
     children.push({ type: "group", title: say.firmware, children: firmwareChildren });
     const wifiChildren: UiNode[] = [];
-    if (board.wifi) {
+    if (board.via !== "serial") {
         wifiChildren.push({ type: "text", text: say.wifiSerialOnly, style: "caption", tone: "muted" });
     } else if (!board.hasWifi) {
         wifiChildren.push({ type: "text", text: board.legacy ? say.wifiSerialOnly : say.wifiMissing, style: "caption", tone: "muted" });
@@ -426,6 +662,7 @@ function renderBoard(): void {
     }
     wifiChildren.push(...noteNode(wifiNote));
     children.push({ type: "group", title: say.wifiGroup, children: wifiChildren });
+    children.push({ type: "group", title: say.bluetoothGroup, children: bluetoothSheetNodes(board, usable) });
     if (!board.legacy && board.boardName !== null) {
         children.push({
             type: "group",
@@ -479,6 +716,52 @@ async function runNote(work: () => ExtensionJob<StoreValue>, done: string): Prom
     }
 }
 
+async function startScan(): Promise<void> {
+    if (scan.running || pairing.running) {
+        return;
+    }
+    scan = { device: "", running: true, fraction: 0, text: "" };
+    bluetoothNote = null;
+    renderMain();
+    try {
+        await box
+            .scan({})
+            .onProgress((fraction, text) => {
+                if (scan.running) {
+                    scan = { device: "", running: true, fraction, text };
+                    renderMain();
+                }
+            }).result;
+    } catch (error) {
+        bluetoothNote = { text: messageOf(error), failed: true };
+    }
+    scan = idle;
+    scanned = true;
+    renderMain();
+}
+
+async function runPairing(device: string, work: () => ExtensionJob<StoreValue>, done: string): Promise<Note | null> {
+    if (pairing.running || scan.running) {
+        return null;
+    }
+    pairing = { device, running: true, fraction: -1, text: "" };
+    renderAll();
+    let note: Note;
+    try {
+        await work().onProgress((fraction, text) => {
+            if (pairing.running && pairing.device === device) {
+                pairing = { device, running: true, fraction, text };
+                renderAll();
+            }
+        }).result;
+        note = { text: done, failed: false };
+    } catch (error) {
+        note = { text: messageOf(error), failed: true };
+    }
+    pairing = idle;
+    return note;
+}
+
 main.on("open", () => {
     mainShown = true;
     renderMain();
@@ -503,9 +786,23 @@ main.on(
             renderMain();
         } else if (id === "flash") {
             await startFlash(chosenPort);
+        } else if (id === "bleScan") {
+            await startScan();
+        } else if (id.startsWith("pair:") || id.startsWith("unpair:")) {
+            const pairs = id.startsWith("pair:");
+            const device = id.substring(id.indexOf(":") + 1);
+            const note = await runPairing(
+                device,
+                () => (pairs ? box.pair({ device }) : box.unpair({ device })),
+                pairs ? say.pairedDone : say.unpaired,
+            );
+            if (note !== null) {
+                bluetoothNote = note;
+            }
+            renderAll();
         } else if (id.startsWith("board:")) {
             const board = boardsNow().find((each) => "board:" + each.id === id);
-            if (board !== undefined && !board.wifi) {
+            if (board !== undefined && board.via === "serial") {
                 chosenPort = board.where;
                 renderMain();
             }
@@ -522,6 +819,7 @@ sheet.on("open", ({ id }) => {
     tapNote = null;
     wifiNote = null;
     renameNote = null;
+    pairNote = null;
     renderBoard();
 });
 
@@ -567,6 +865,17 @@ sheet.on(
             wifiNote = await runNote(() => box.wifi({ device, ssid: "", password: "" }), say.wifiForgotten);
         } else if (id === "rename") {
             renameNote = await runNote(() => box.rename({ device, name: boardName.trim() }), say.renamed);
+        } else if (id === "pair" || id === "unpair") {
+            const note = await runPairing(
+                device,
+                () => (id === "pair" ? box.pair({ device }) : box.unpair({ device })),
+                id === "pair" ? say.pairedDone : say.unpaired,
+            );
+            if (note !== null) {
+                pairNote = note;
+            }
+            renderAll();
+            return;
         } else if (id === "diagnose") {
             diagnosis = { device, ok: true, text: "…", rows: [] };
             renderBoard();
@@ -583,7 +892,7 @@ sheet.on(
     { again: "parallel" },
 );
 
-for (const topic of ["board.added", "board.changed", "board.removed", "ports.changed"]) {
+for (const topic of ["board.added", "board.changed", "board.removed", "ports.changed", "bluetooth.changed"]) {
     events.on(topic, () => renderAll(), { again: "queue" });
 }
 

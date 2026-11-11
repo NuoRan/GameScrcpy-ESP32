@@ -1,4 +1,4 @@
-The ESP32 touch box is an ESP32 development board with the touch box firmware on it: the phone takes it for a plugged-in touch screen, keyboard, mouse and gamepad, so it works even with USB debugging off. This extension finds the boards, shows them on the Devices page, flashes their firmware and sends them the touches over a serial port (or over Wi-Fi).
+The ESP32 touch box is an ESP32 development board with the touch box firmware on it: the phone takes it for a plugged-in touch screen, keyboard, mouse and gamepad, so it works even with USB debugging off. This extension finds the boards, shows them on the Devices page, flashes their firmware and sends them the touches over a serial port (or over Wi-Fi or Bluetooth).
 
 ## Pick a board
 
@@ -17,9 +17,9 @@ The ESP32 touch box is an ESP32 development board with the touch box firmware on
 
 ## Where the settings are
 
-- **The board's card on the Devices page**: Settings opens the board's own window: what it is, its firmware, Try it, Wi-Fi, its name and a diagnosis. More holds Try it, Flash firmware, Diagnose and Disconnect.
-- **The extension's card on the Extensions page**: Settings shows every board found and lets you flash the firmware to any serial port, also to a board that does not answer yet.
-- **A phone's settings**: the touch method ESP32, and this extension's settings for that phone: the serial port (auto or a port such as COM7), the connection (serial port or Wi-Fi) and the Wi-Fi address. The values for all phones are in the extension's settings.
+- **The board's card on the Devices page**: Settings opens the board's own window: what it is, its firmware, Try it, Wi-Fi, Bluetooth, its name and a diagnosis. More holds Try it, Flash firmware, Diagnose and Disconnect.
+- **The extension's card on the Extensions page**: Settings shows every board found, the boards found over Bluetooth with their pairing, and lets you flash the firmware to any serial port, also to a board that does not answer yet.
+- **A phone's settings**: the touch method ESP32, and this extension's settings for that phone: the serial port (auto or a port such as COM7), the connection (serial port, Wi-Fi or Bluetooth) and the address (an IP address for Wi-Fi, a Bluetooth address for Bluetooth). The values for all phones are in the extension's settings.
 
 ## Flash or upgrade the firmware
 
@@ -32,6 +32,19 @@ On the board's card choose Flash firmware, or in the extension's settings pick t
 
 While the board is on the serial port, open its window from its card, enter the network name and password in the Wi-Fi group and click Save Wi-Fi; the extension also makes a key that only this computer knows. Then choose Wi-Fi as the connection in the extension's settings (or in one phone's settings): with the address left empty it finds the board by itself, or enter its IP address. Wi-Fi adds 1 to 3 ms of delay and sometimes jitters.
 
+## Connect over Bluetooth
+
+With firmware 1.1 or later, the classic ESP32, the C3, the C6 and the S3 can also reach this computer over Bluetooth LE, so the board needs no cable to this computer. The phone keeps its own connection: Bluetooth on the classic ESP32, C3 and C6, USB on the S3. This computer needs Bluetooth LE.
+
+1. **Pair once**: with the board on the serial port, open its window and click Pair over Bluetooth in the Bluetooth group. The board gets a key that only this computer knows (the same key as for Wi-Fi), Windows pairs with it and the link is checked once. A board whose key this computer already has, for example after setting up its Wi-Fi, can be paired without the cable: in the extension's settings click Look for boards in the Bluetooth group, then Pair under the board.
+2. **Choose Bluetooth**: choose Bluetooth as the connection in the extension's settings (or in one phone's settings). With the address left empty the extension uses the boards paired with this computer; to pick one, enter its Bluetooth address, such as AA:BB:CC:DD:EE:FF.
+3. **Forget**: Forget pairing, in the board's window or in the extension's settings, removes the pairing from Windows and from the extension; the board keeps its key for Wi-Fi.
+
+A board on Bluetooth shows a Bluetooth icon and its signal on its card; its window shows the round trip and the slowest round trip in every hundred. When that slowest round trip goes over 30 ms, the window says "Bluetooth delay is high": move the board nearer to this computer and away from Wi-Fi routers and USB 3 ports, or use the serial port.
+
+> [!NOTE]
+> The board sends touches only to the phone, never to this computer, even though both are paired with it. It remembers up to four computers.
+
 ## What the messages mean
 
 - **"Nothing answers on this port"**: the board sent nothing at all. On an ESP32-S3 or S2 with two USB ports, the computer must use the port marked "COM" or "UART" (the USB-to-serial chip); the port marked "USB" goes to the phone. Check the cable too.
@@ -40,6 +53,10 @@ While the board is on the serial port, open its window from its card, enter the 
 - **"The bytes on this port do not look like the ESP32 touch box"**: something answers, but it is not this protocol: the wrong port, a serial speed the cable cannot keep, or a board that restarts before it can talk.
 - **"The board runs the old QineTouch firmware"**: only touches can be sent before the new firmware is flashed.
 - **"In use by …"**: another extension or your own logic has the serial port; the board comes back when it lets go, or when you look for boards again.
+- **"This computer has no Bluetooth LE, or Bluetooth is off"**: turn Bluetooth on in the Windows settings, or plug in a Bluetooth LE adapter.
+- **"No board is paired over Bluetooth yet"**: the connection is Bluetooth but no board is paired; pair one as described above.
+- **"Plug the board into this computer by USB once and pair it from its window"**: this computer has no key for the board, or the board lost its key after its flash was erased.
+- **"Bluetooth delay is high"**: see Connect over Bluetooth.
 - Diagnose on the board's card asks the board what it is and says what is wrong; the board's window shows the answer.
 
 ## Safety and tips
