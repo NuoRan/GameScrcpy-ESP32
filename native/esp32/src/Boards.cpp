@@ -111,8 +111,8 @@ std::vector<KnownBoard> parseBoards(std::string_view json)
             board.address = address->get<std::string>().substr(0, kMostAddress);
         }
         if (const auto bluetooth = entry.find("bluetooth"); bluetooth != entry.end() && bluetooth->is_string()) {
-            if (const std::optional<std::uint64_t> parsed = parseBluetooth(bluetooth->get<std::string>())) {
-                board.bluetooth = bluetoothText(*parsed);
+            if (const std::optional<std::uint64_t> radio = parseBluetooth(bluetooth->get<std::string>())) {
+                board.bluetooth = bluetoothText(*radio);
             }
         }
         boards.push_back(std::move(board));
