@@ -1,6 +1,6 @@
 #include "gs/espflash/Md5.h"
 
-#include <gs/platform/Crypto.h>
+#include <gs/support/Crypto.h>
 
 #include <windows.h>
 #include <bcrypt.h>

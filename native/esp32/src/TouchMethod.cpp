@@ -4,7 +4,7 @@
 #include "gs/esp32/Discovery.h"
 #include "gs/esp32/UdpPort.h"
 
-#include <gs/base/Log.h>
+#include <gs/support/Log.h>
 
 #include <algorithm>
 #include <cctype>
@@ -128,7 +128,7 @@ Expected<OpenedLink, OpenFailure> openSerial(const Esp32Settings& settings, cons
 Expected<OpenedLink, OpenFailure> openWifi(const Esp32Settings& settings, const LinkEvents& events,
                                            const std::stop_token& stop)
 {
-    const std::vector<KnownBoard> known = loadBoards(settings.boardsFile);
+    const std::vector<KnownBoard>& known = settings.knownBoards;
     if (known.empty()) {
         return makeUnexpected(OpenFailure::NoKey);
     }
@@ -215,7 +215,7 @@ Expected<void, OpenFailure> Esp32TouchMethod::open(const Esp32Settings& settings
     return {};
 }
 
-void Esp32TouchMethod::attach(std::unique_ptr<Esp32Link> link)
+void Esp32TouchMethod::attach(std::shared_ptr<Esp32Link> link)
 {
     const std::lock_guard lock(m_mutex);
     m_link = std::move(link);
@@ -365,7 +365,7 @@ void Esp32TouchMethod::releaseLocked()
 
 void Esp32TouchMethod::close()
 {
-    std::unique_ptr<Esp32Link> link;
+    std::shared_ptr<Esp32Link> link;
     {
         const std::lock_guard lock(m_mutex);
         releaseLocked();

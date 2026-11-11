@@ -5,7 +5,7 @@
 #include <gs/espflash/Flasher.h>
 #include <gs/espflash/Loader.h>
 #include <gs/espflash/Slip.h>
-#include <gs/platform/Crypto.h>
+#include <gs/support/Crypto.h>
 
 #include <doctest/doctest.h>
 

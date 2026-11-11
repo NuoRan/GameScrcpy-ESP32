@@ -1,14 +1,14 @@
 #pragma once
 
+#include "gs/esp32/Boards.h"
 #include "gs/esp32/Contacts.h"
 #include "gs/esp32/Keys.h"
 #include "gs/esp32/Link.h"
 #include "gs/esp32/Port.h"
 
-#include <gs/base/Expected.h>
+#include <gs/support/Expected.h>
 
 #include <cstdint>
-#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -16,6 +16,7 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace gs::esp32 {
 
@@ -27,7 +28,7 @@ struct Esp32Settings {
     std::string port = std::string(kAutomaticPort);
     LinkMode link = LinkMode::Serial;
     std::string address;
-    std::filesystem::path boardsFile;
+    std::vector<KnownBoard> knownBoards;
 };
 
 enum class OpenFailure : std::uint8_t { NoBoard, PortMissing, PortBusy, NoAnswer, NoKey, BadAddress, Stopped };
@@ -74,7 +75,7 @@ public:
     Esp32TouchMethod& operator=(const Esp32TouchMethod&) = delete;
 
     [[nodiscard]] Expected<void, OpenFailure> open(const Esp32Settings& settings, const std::stop_token& stop = {});
-    void attach(std::unique_ptr<Esp32Link> link);
+    void attach(std::shared_ptr<Esp32Link> link);
     [[nodiscard]] Esp32Capabilities capabilities() const;
     [[nodiscard]] bool frame(std::span<const Contact> contacts, int rotation);
     [[nodiscard]] bool key(std::uint32_t androidKeycode, bool down);
@@ -91,7 +92,7 @@ private:
     void releaseLocked();
 
     mutable std::mutex m_mutex;
-    std::unique_ptr<Esp32Link> m_link;
+    std::shared_ptr<Esp32Link> m_link;
     ContactSlots m_slots;
     KeyboardState m_keyboard;
     std::uint16_t m_consumer = 0;

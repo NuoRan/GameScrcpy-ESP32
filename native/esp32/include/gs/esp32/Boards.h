@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstdint>
-#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -12,9 +11,9 @@
 namespace gs::esp32 {
 
 inline constexpr std::size_t kBoardKeySize = 32;
-inline constexpr std::string_view kBoardsFormat = "gamescrcpy.esp32-boards";
+inline constexpr std::string_view kBoardsFormat = "community.esp32-boards";
 inline constexpr int kBoardsVersion = 1;
-inline constexpr std::string_view kBoardsFileName = "esp32-boards.json";
+inline constexpr std::string_view kBoardsStoreKey = "boards";
 
 using BoardKey = std::array<std::uint8_t, kBoardKeySize>;
 
@@ -32,10 +31,8 @@ struct KnownBoard {
 [[nodiscard]] BoardKey newBoardKey();
 [[nodiscard]] std::vector<KnownBoard> parseBoards(std::string_view json);
 [[nodiscard]] std::string writeBoards(const std::vector<KnownBoard>& boards);
-[[nodiscard]] std::vector<KnownBoard> loadBoards(const std::filesystem::path& file);
-[[nodiscard]] bool saveBoards(const std::filesystem::path& file, const std::vector<KnownBoard>& boards);
-[[nodiscard]] bool rememberBoard(const std::filesystem::path& file, const KnownBoard& board);
-[[nodiscard]] bool forgetBoard(const std::filesystem::path& file, std::string_view id);
+[[nodiscard]] std::vector<KnownBoard> rememberBoard(std::vector<KnownBoard> boards, const KnownBoard& board);
+[[nodiscard]] std::vector<KnownBoard> forgetBoard(std::vector<KnownBoard> boards, std::string_view id);
 [[nodiscard]] std::optional<KnownBoard> findBoard(const std::vector<KnownBoard>& boards, std::string_view id);
 
 }

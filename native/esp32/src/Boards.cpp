@@ -1,13 +1,13 @@
 #include "gs/esp32/Boards.h"
 
-#include <gs/platform/AtomicFile.h>
-#include <gs/platform/Crypto.h>
+#include <gs/support/Crypto.h>
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <string>
+#include <utility>
 
 namespace gs::esp32 {
 
@@ -15,7 +15,6 @@ namespace {
 
 using Json = nlohmann::ordered_json;
 
-constexpr std::size_t kMostFileBytes = 256 * 1024;
 constexpr std::size_t kMostBoards = 64;
 constexpr std::size_t kMostName = 64;
 constexpr std::size_t kMostAddress = 255;
@@ -138,41 +137,23 @@ std::string writeBoards(const std::vector<KnownBoard>& boards)
     return root.dump(2, ' ', false, Json::error_handler_t::replace) + "\n";
 }
 
-std::vector<KnownBoard> loadBoards(const std::filesystem::path& file)
-{
-    std::string text;
-    if (platform::readFile(file, kMostFileBytes, text)) {
-        return {};
-    }
-    return parseBoards(text);
-}
-
-bool saveBoards(const std::filesystem::path& file, const std::vector<KnownBoard>& boards)
-{
-    std::error_code ignored;
-    (void)std::filesystem::create_directories(file.parent_path(), ignored);
-    return !platform::writeFileAtomically(file, writeBoards(boards));
-}
-
-bool rememberBoard(const std::filesystem::path& file, const KnownBoard& board)
+std::vector<KnownBoard> rememberBoard(std::vector<KnownBoard> boards, const KnownBoard& board)
 {
     if (!validBoardId(board.id)) {
-        return false;
+        return boards;
     }
-    std::vector<KnownBoard> boards = loadBoards(file);
     std::erase_if(boards, [&board](const KnownBoard& known) { return known.id == board.id; });
     boards.insert(boards.begin(), board);
     if (boards.size() > kMostBoards) {
         boards.resize(kMostBoards);
     }
-    return saveBoards(file, boards);
+    return boards;
 }
 
-bool forgetBoard(const std::filesystem::path& file, std::string_view id)
+std::vector<KnownBoard> forgetBoard(std::vector<KnownBoard> boards, std::string_view id)
 {
-    std::vector<KnownBoard> boards = loadBoards(file);
-    const auto removed = std::erase_if(boards, [id](const KnownBoard& known) { return known.id == id; });
-    return removed > 0 && saveBoards(file, boards);
+    std::erase_if(boards, [id](const KnownBoard& known) { return known.id == id; });
+    return boards;
 }
 
 std::optional<KnownBoard> findBoard(const std::vector<KnownBoard>& boards, std::string_view id)

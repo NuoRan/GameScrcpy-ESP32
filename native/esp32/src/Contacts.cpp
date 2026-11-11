@@ -1,6 +1,6 @@
 #include "gs/esp32/Contacts.h"
 
-#include <gs/base/InplaceVector.h>
+#include <gs/support/InplaceVector.h>
 
 #include <algorithm>
 

@@ -1,7 +1,7 @@
 #include "gs/espflash/Firmware.h"
 
-#include <gs/platform/AtomicFile.h>
-#include <gs/platform/Crypto.h>
+#include <gs/support/Crypto.h>
+#include <gs/support/Files.h>
 
 #include <nlohmann/json.hpp>
 

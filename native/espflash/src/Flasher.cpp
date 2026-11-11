@@ -4,7 +4,7 @@
 #include "gs/espflash/Loader.h"
 #include "gs/espflash/Md5.h"
 
-#include <gs/base/Log.h>
+#include <gs/support/Log.h>
 
 #include <miniz.h>
 
@@ -352,7 +352,7 @@ std::string_view failureText(FlashFailure failure) noexcept
 {
     switch (failure) {
     case FlashFailure::NoFirmware:
-        return "No firmware is bundled with GameScrcpy.";
+        return "No firmware is bundled with the extension.";
     case FlashFailure::NoImageForChip:
         return "The bundled firmware has no image for this chip.";
     case FlashFailure::ImageMissing:
@@ -366,7 +366,7 @@ std::string_view failureText(FlashFailure failure) noexcept
     case FlashFailure::NoDownloadMode:
         return "Could not enter download mode: hold BOOT while plugging in the cable, then try again.";
     case FlashFailure::UnknownChip:
-        return "The chip on the board is not one GameScrcpy knows.";
+        return "The chip on the board is not one the extension knows.";
     case FlashFailure::Refused:
         return "The board refused a flashing command.";
     case FlashFailure::WriteFailed:

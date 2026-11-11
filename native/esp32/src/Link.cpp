@@ -1,7 +1,7 @@
 #include "gs/esp32/Link.h"
 
-#include <gs/base/Log.h>
-#include <gs/platform/Thread.h>
+#include <gs/support/Log.h>
+#include <gs/support/Thread.h>
 
 #include <algorithm>
 #include <array>

@@ -75,7 +75,7 @@ TEST_CASE("a Wi-Fi address is a host with an optional port, 4545 by default")
     CHECK_FALSE(gs::esp32::parseAddress(":4545", 4545).has_value());
 }
 
-TEST_CASE("Wi-Fi keys are remembered per board in esp32-boards.json, and damaged entries are skipped")
+TEST_CASE("ADR-0112: Wi-Fi keys are remembered per board in the extension's store, and damaged entries are skipped")
 {
     const std::array<std::uint8_t, 6> mac{0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6};
     CHECK(gs::esp32::boardId(mac) == "a1b2c3d4e5f6");
@@ -90,9 +90,10 @@ TEST_CASE("Wi-Fi keys are remembered per board in esp32-boards.json, and damaged
     board.address = "192.168.1.20";
     const std::string text = gs::esp32::writeBoards({board});
     CHECK(gs::esp32::parseBoards(text) == std::vector<KnownBoard>{board});
+    CHECK(text.find("\"community.esp32-boards\"") != std::string::npos);
     CHECK(gs::esp32::newBoardKey() != board.key);
 
-    const std::string damaged = R"({"format": "gamescrcpy.esp32-boards", "version": 1, "boards": {
+    const std::string damaged = R"({"format": "community.esp32-boards", "version": 1, "boards": {
         "a1b2c3d4e5f6": {"key": "00"},
         "NOTANID": {"key": "0000000000000000000000000000000000000000000000000000000000000000"},
         "001122334455": {"name": "Ok", "key": "0101010101010101010101010101010101010101010101010101010101010101"}}})";
@@ -102,23 +103,27 @@ TEST_CASE("Wi-Fi keys are remembered per board in esp32-boards.json, and damaged
     CHECK(parsed[0].name == "Ok");
     CHECK(parsed[0].key[31] == 1);
     CHECK(gs::esp32::parseBoards(R"({"format": "other", "version": 1, "boards": {}})").empty());
+    CHECK(gs::esp32::parseBoards(R"({"format": "gamescrcpy.esp32-boards", "version": 1, "boards": {
+        "001122334455": {"key": "0101010101010101010101010101010101010101010101010101010101010101"}}})")
+              .empty());
     CHECK(gs::esp32::parseBoards("not json").empty());
 
-    const esp32test::TemporaryFolder folder;
-    const auto file = folder.path() / "esp32-boards.json";
-    CHECK(gs::esp32::loadBoards(file).empty());
-    REQUIRE(gs::esp32::rememberBoard(file, board));
+    std::vector<KnownBoard> known = gs::esp32::rememberBoard({}, board);
     KnownBoard other = board;
     other.id = "001122334455";
     other.name = "Second";
-    REQUIRE(gs::esp32::rememberBoard(file, other));
+    known = gs::esp32::rememberBoard(std::move(known), other);
     board.name = "Renamed";
-    REQUIRE(gs::esp32::rememberBoard(file, board));
-    const std::vector<KnownBoard> loaded = gs::esp32::loadBoards(file);
-    REQUIRE(loaded.size() == 2);
-    CHECK(gs::esp32::findBoard(loaded, "a1b2c3d4e5f6")->name == "Renamed");
-    CHECK(gs::esp32::forgetBoard(file, "001122334455"));
-    CHECK_FALSE(gs::esp32::forgetBoard(file, "001122334455"));
-    CHECK(gs::esp32::loadBoards(file).size() == 1);
-    CHECK_FALSE(gs::esp32::findBoard(loaded, "ffffffffffff").has_value());
+    known = gs::esp32::rememberBoard(std::move(known), board);
+    REQUIRE(known.size() == 2);
+    CHECK(known.front().id == "a1b2c3d4e5f6");
+    CHECK(gs::esp32::findBoard(known, "a1b2c3d4e5f6")->name == "Renamed");
+    KnownBoard invalid = board;
+    invalid.id = "NOTANID";
+    CHECK(gs::esp32::rememberBoard(known, invalid) == known);
+    known = gs::esp32::forgetBoard(std::move(known), "001122334455");
+    CHECK(known.size() == 1);
+    CHECK(gs::esp32::forgetBoard(known, "001122334455").size() == 1);
+    CHECK(gs::esp32::parseBoards(gs::esp32::writeBoards(known)) == known);
+    CHECK_FALSE(gs::esp32::findBoard(known, "ffffffffffff").has_value());
 }

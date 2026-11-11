@@ -1,6 +1,6 @@
 #include "gs/esp32/Port.h"
 
-#include <gs/base/Log.h>
+#include <gs/support/Log.h>
 
 #include <windows.h>
 

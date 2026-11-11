@@ -1,7 +1,7 @@
 #include "TestSupport.h"
 
 #include <gs/espflash/Firmware.h>
-#include <gs/platform/Crypto.h>
+#include <gs/support/Crypto.h>
 
 #include <doctest/doctest.h>
 

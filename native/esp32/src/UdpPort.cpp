@@ -2,7 +2,7 @@
 
 #include <gs_esp32_protocol.h>
 
-#include <gs/platform/UdpSocket.h>
+#include <gs/support/UdpSocket.h>
 
 #include <winsock2.h>
 #include <ws2tcpip.h>

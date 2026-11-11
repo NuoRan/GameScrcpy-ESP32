@@ -1,6 +1,6 @@
 #include "gs/espflash/Loader.h"
 
-#include <gs/platform/Crypto.h>
+#include <gs/support/Crypto.h>
 
 #include <algorithm>
 #include <array>

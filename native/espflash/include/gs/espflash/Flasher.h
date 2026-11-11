@@ -2,7 +2,7 @@
 
 #include "gs/espflash/Chips.h"
 
-#include <gs/base/Expected.h>
+#include <gs/support/Expected.h>
 #include <gs/esp32/Port.h>
 
 #include <chrono>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <gs/base/Expected.h>
+#include <gs/support/Expected.h>
 
 #include <array>
 #include <cstdint>
@@ -14,7 +14,7 @@ namespace gs::espflash {
 
 inline constexpr std::string_view kFirmwareFormat = "gamescrcpy.esp32-firmware";
 inline constexpr std::string_view kFirmwareManifest = "firmware.json";
-inline constexpr std::string_view kFirmwareFolder = "esp32-firmware";
+inline constexpr std::string_view kFirmwareFolder = "firmware";
 
 struct FirmwareImage {
     std::string target;
