@@ -13,6 +13,13 @@ OVERHEAD = 8
 MAX_PAYLOAD = 512
 MAX_FRAME = 520
 TAG_SIZE = 16
+MAX_RECORD = MAX_FRAME + TAG_SIZE
+BLE_LABEL = b"GS-BLE"
+BLE_UUIDS = {
+    "service": "1bc20001-0a59-4b54-9f43-31727a88f19c",
+    "rx": "1bc20002-0a59-4b54-9f43-31727a88f19c",
+    "tx": "1bc20003-0a59-4b54-9f43-31727a88f19c",
+}
 
 TYPES = {
     "hello_req": 0x01,
@@ -29,6 +36,7 @@ TYPES = {
     "set_name": 0x0C,
     "reboot": 0x0D,
     "enter_download": 0x0E,
+    "key_set": 0x0F,
     "hello": 0x81,
     "status": 0x82,
     "pong": 0x83,
@@ -91,7 +99,10 @@ def encode_gamepad(fields: dict) -> bytes:
 
 
 def encode_token(fields: dict) -> bytes:
-    return struct.pack("<I", fields["token"])
+    out = struct.pack("<I", fields["token"])
+    if "signal" in fields:
+        out += struct.pack("<b", fields["signal"])
+    return out
 
 
 def encode_set_baud(fields: dict) -> bytes:
@@ -102,6 +113,12 @@ def encode_wifi_set(fields: dict) -> bytes:
     key = bytes.fromhex(fields["key"])
     assert len(key) == 32
     return text(fields["ssid"], 32) + text(fields["password"], 64) + key
+
+
+def encode_key_set(fields: dict) -> bytes:
+    key = bytes.fromhex(fields["key"])
+    assert len(key) == 32
+    return key
 
 
 def encode_name(fields: dict) -> bytes:
@@ -149,6 +166,7 @@ ENCODERS = {
     "set_name": encode_name,
     "reboot": encode_empty,
     "enter_download": encode_empty,
+    "key_set": encode_key_set,
     "hello": encode_hello,
     "status": encode_status,
     "pong": encode_token,
@@ -188,6 +206,7 @@ MESSAGES = [
     ("set-name", "set_name", 19, {"name": "Desk box"}),
     ("reboot", "reboot", 20, {}),
     ("enter-download", "enter_download", 21, {}),
+    ("key-set", "key_set", 22, {"key": KEY.hex()}),
     ("hello-s3", "hello", 0, {"protocol": 2, "firmware": "1.0.0", "chipId": 9, "chipRevision": 2,
                               "features": 0x09, "mac": "a1b2c3d4e5f6", "wifi": 3, "ipv4": [192, 168, 1, 20],
                               "name": "GameScrcpy S3"}),
@@ -201,6 +220,8 @@ MESSAGES = [
     ("status-ble-connected", "status", 4, {"usb": 0, "ble": 3, "peer": "Pixel 8", "wifi": 3,
                                            "ipv4": [10, 0, 0, 7]}),
     ("pong", "pong", 5, {"token": 0xFFFFFFFF}),
+    ("pong-with-signal", "pong", 9, {"token": 7, "signal": -58}),
+    ("pong-with-strong-signal", "pong", 10, {"token": 0x01020304, "signal": 4}),
     ("log", "log", 6, {"level": 2, "text": "boot ok"}),
     ("error", "error", 7, {"code": 3, "text": "unsupported"}),
 ]
@@ -227,6 +248,8 @@ INVALID = [
     ("set-name-empty", "set_name", "00"),
     ("set-name-too-long", "set_name", "21" + "61" * 33),
     ("set-name-truncated", "set_name", "05616263"),
+    ("key-set-short", "key_set", "00" * 31),
+    ("key-set-empty", "key_set", ""),
     ("hello-firmware-too-long", "hello", "02" + "11" + "31" * 17 + "0900" + "0200" + "09000000" + "00" * 6
      + "01" + "00" * 4 + "00"),
     ("hello-truncated", "hello", "0205312e302e3009000200"),
@@ -395,6 +418,149 @@ def legacy_vectors() -> list[dict]:
     return out
 
 
+def ble_tag(key: bytes, data: bytes) -> bytes:
+    return hmac.new(key, BLE_LABEL + data, hashlib.sha256).digest()[:TAG_SIZE]
+
+
+def record(data: bytes, key: bytes) -> bytes:
+    return data + ble_tag(key, data)
+
+
+def uuid_bytes(text_form: str) -> bytes:
+    return bytes.fromhex(text_form.replace("-", ""))[::-1]
+
+
+class RecordParser(Parser):
+    def feed(self, data: bytes) -> int:
+        self.consume()
+        take = min(MAX_RECORD - len(self.buffer), len(data))
+        self.buffer += data[:take]
+        return take
+
+    def next_record(self) -> tuple[bytes, bytes] | None:
+        self.consume()
+        while True:
+            if not self.buffer:
+                return None
+            if self.buffer[0] != MAGIC0:
+                self.skip()
+                continue
+            if len(self.buffer) < 2:
+                return None
+            if self.buffer[1] != MAGIC1:
+                self.skip()
+                continue
+            if len(self.buffer) < HEADER:
+                return None
+            length = self.buffer[4] | (self.buffer[5] << 8)
+            if length > MAX_PAYLOAD:
+                self.bad += 1
+                self.skip()
+                continue
+            total = OVERHEAD + length
+            if len(self.buffer) < total:
+                return None
+            stored = self.buffer[HEADER + length] | (self.buffer[HEADER + length + 1] << 8)
+            if crc16(bytes(self.buffer[2:HEADER + length])) != stored:
+                self.bad += 1
+                self.skip()
+                continue
+            if len(self.buffer) < total + TAG_SIZE:
+                return None
+            self.ready = total + TAG_SIZE
+            return bytes(self.buffer[:total]), bytes(self.buffer[total:total + TAG_SIZE])
+
+
+def run_records(data: bytes, chunk: int, key: bytes) -> tuple[list[bytes], int, int, int]:
+    parser = RecordParser()
+    frames: list[bytes] = []
+    bad_tags = 0
+    at = 0
+    while at < len(data):
+        taken = parser.feed(data[at:at + chunk])
+        at += taken
+        while (found := parser.next_record()) is not None:
+            if ble_tag(key, found[0]) == found[1]:
+                frames.append(found[0])
+            else:
+                bad_tags += 1
+    return frames, bad_tags, parser.bad, parser.dropped
+
+
+def ble_tag_vectors() -> list[dict]:
+    ping = frame(TYPES["ping"], 3, struct.pack("<I", 42))
+    hello = frame(TYPES["hello"], 0, encode_hello({"protocol": 2, "firmware": "1.1.0", "chipId": 5, "chipRevision": 4,
+                                                   "features": 0x6C, "mac": "deadbeef0102", "wifi": 1,
+                                                   "ipv4": [0, 0, 0, 0], "name": "C3"}))
+    out = []
+    for name, key, data in (("ping", KEY, ping), ("hello", hashlib.sha256(b"bluetooth").digest(), hello)):
+        tag = ble_tag(key, data)
+        udp = hmac.new(key, data, hashlib.sha256).digest()[:TAG_SIZE]
+        assert tag != udp
+        out.append({"name": name, "key": key.hex(), "frame": data.hex(), "tag": tag.hex(), "udpTag": udp.hex(),
+                    "record": (data + tag).hex()})
+    return out
+
+
+def record_vectors() -> list[dict]:
+    key = KEY
+    other = bytes(32)
+    a = frame(TYPES["hello_req"], 0, bytes([2]))
+    b = frame(TYPES["touch"], 1, encode_touch({"contacts": [{"id": 0, "tip": 1, "x": 100, "y": 200}]}))
+    c = frame(TYPES["log"], 2, bytes([2]) + text("x" * 240, 255))
+    d = frame(TYPES["pong"], 3, encode_token({"token": 9, "signal": -61}))
+    streams = [
+        ("back-to-back", record(a, key) + record(b, key) + record(c, key) + record(d, key)),
+        ("other-key-skipped", record(a, other) + record(b, key)),
+        ("udp-tag-refused", a + hmac.new(key, a, hashlib.sha256).digest()[:TAG_SIZE] + record(d, key)),
+        ("garbage-first", bytes([0x00, 0xA5, 0x11, 0x5A]) + record(b, key)),
+        ("bad-crc-then-good", bad_crc(record(a, key)) + record(c, key)),
+        ("oversized-length-then-good", bytes([MAGIC0, MAGIC1, 0x84, 0x00, 0xFF, 0xFF]) + record(d, key)),
+        ("tag-not-there-yet", record(a, key) + record(b, key)[:-3]),
+        ("frame-only", a + b),
+    ]
+    out = []
+    for name, data in streams:
+        results = [run_records(data, chunk, key) for chunk in (1, 7, 20, 244, MAX_RECORD)]
+        assert all(result == results[0] for result in results), name
+        frames, bad_tags, bad, dropped = results[0]
+        out.append({"name": name, "key": key.hex(), "bytes": data.hex(), "frames": [f.hex() for f in frames],
+                    "badTags": bad_tags, "badFrames": bad, "dropped": dropped})
+    return out
+
+
+def advert_vectors() -> list[dict]:
+    service = uuid_bytes(BLE_UUIDS["service"])
+    samples = [
+        ("keyed-c3", {"id": "deadbeef0102", "chip": 5, "flags": 1}),
+        ("busy-s3", {"id": "a1b2c3d4e5f6", "chip": 9, "flags": 3}),
+        ("new-esp32", {"id": "001122334455", "chip": 0, "flags": 0}),
+        ("grown", {"id": "0a0b0c0d0e0f", "chip": 13, "flags": 1, "extra": "beef"}),
+    ]
+    out = []
+    for name, fields in samples:
+        data = bytes.fromhex(fields["id"]) + bytes([fields["chip"], fields["flags"]]) + bytes.fromhex(
+            fields.get("extra", ""))
+        out.append({"name": name, "fields": {key: value for key, value in fields.items() if key != "extra"},
+                    "data": data.hex(), "section": (service + data).hex()})
+    return out
+
+
+def bluetooth_vectors() -> dict:
+    service = uuid_bytes(BLE_UUIDS["service"])
+    return {
+        "uuids": {name: {"text": value, "bytes": uuid_bytes(value).hex()} for name, value in BLE_UUIDS.items()},
+        "tags": ble_tag_vectors(),
+        "records": record_vectors(),
+        "adverts": advert_vectors(),
+        "invalidAdverts": [
+            {"name": "too-short", "section": (service + bytes.fromhex("deadbeef0102") + bytes([5])).hex()},
+            {"name": "other-service", "section": (uuid_bytes(BLE_UUIDS["rx"]) + bytes(8)).hex()},
+            {"name": "uuid-only", "section": service.hex()},
+        ],
+    }
+
+
 def message_vectors() -> list[dict]:
     out = []
     for name, kind, seq, fields in MESSAGES:
@@ -420,6 +586,7 @@ def main() -> None:
         "streams": stream_vectors(),
         "tags": tag_vectors(),
         "legacy": legacy_vectors(),
+        "bluetooth": bluetooth_vectors(),
     }
     out = Path(__file__).resolve().parent / "vectors.json"
     out.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")

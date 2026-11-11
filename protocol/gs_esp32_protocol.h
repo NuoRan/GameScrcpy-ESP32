@@ -36,6 +36,22 @@ extern "C" {
 #define GS_ESP32_MAX_SSID 32
 #define GS_ESP32_MAX_PASSWORD 64
 #define GS_ESP32_MAX_TEXT 255
+#define GS_ESP32_MAX_RECORD 536
+#define GS_ESP32_BLE_MTU 247
+#define GS_ESP32_BLE_LABEL "GS-BLE"
+#define GS_ESP32_BLE_LABEL_SIZE 6
+#define GS_ESP32_ADVERT_SIZE 8
+#define GS_ESP32_ADVERT_KEYED 0x01u
+#define GS_ESP32_ADVERT_BUSY 0x02u
+#define GS_ESP32_SIGNAL_UNKNOWN 127
+
+#define GS_ESP32_BLE_SERVICE_UUID "1bc20001-0a59-4b54-9f43-31727a88f19c"
+#define GS_ESP32_BLE_RX_UUID "1bc20002-0a59-4b54-9f43-31727a88f19c"
+#define GS_ESP32_BLE_TX_UUID "1bc20003-0a59-4b54-9f43-31727a88f19c"
+#define GS_ESP32_BLE_UUID_LOW 0x9C, 0xF1, 0x88, 0x7A, 0x72, 0x31, 0x43, 0x9F, 0x54, 0x4B, 0x59, 0x0A
+#define GS_ESP32_BLE_SERVICE_UUID128 GS_ESP32_BLE_UUID_LOW, 0x01, 0x00, 0xC2, 0x1B
+#define GS_ESP32_BLE_RX_UUID128 GS_ESP32_BLE_UUID_LOW, 0x02, 0x00, 0xC2, 0x1B
+#define GS_ESP32_BLE_TX_UUID128 GS_ESP32_BLE_UUID_LOW, 0x03, 0x00, 0xC2, 0x1B
 
 #define GS_ESP32_MSG_HELLO_REQ 0x01
 #define GS_ESP32_MSG_TOUCH 0x02
@@ -51,6 +67,7 @@ extern "C" {
 #define GS_ESP32_MSG_SET_NAME 0x0C
 #define GS_ESP32_MSG_REBOOT 0x0D
 #define GS_ESP32_MSG_ENTER_DOWNLOAD 0x0E
+#define GS_ESP32_MSG_KEY_SET 0x0F
 #define GS_ESP32_MSG_HELLO 0x81
 #define GS_ESP32_MSG_STATUS 0x82
 #define GS_ESP32_MSG_PONG 0x83
@@ -62,6 +79,8 @@ extern "C" {
 #define GS_ESP32_FEATURE_BLE_HID 0x04u
 #define GS_ESP32_FEATURE_WIFI 0x08u
 #define GS_ESP32_FEATURE_USB_SERIAL_LINK 0x10u
+#define GS_ESP32_FEATURE_BLE_LINK 0x20u
+#define GS_ESP32_FEATURE_KEYED 0x40u
 
 #define GS_ESP32_USB_NONE 0
 #define GS_ESP32_USB_DETACHED 1
@@ -221,6 +240,20 @@ typedef struct {
     uint32_t dropped;
     uint32_t bad_frames;
 } gs_esp32_parser;
+
+typedef struct {
+    uint8_t buffer[GS_ESP32_MAX_RECORD];
+    size_t used;
+    size_t ready;
+    uint32_t dropped;
+    uint32_t bad_frames;
+} gs_esp32_record_parser;
+
+typedef struct {
+    uint8_t id[6];
+    uint8_t chip;
+    uint8_t flags;
+} gs_esp32_advert;
 
 typedef struct {
     uint32_t state[8];
@@ -742,6 +775,165 @@ static inline int gs_esp32_datagram_open(const uint8_t *datagram, size_t size, c
     return gs_esp32_frame_decode(datagram, frame_size, frame);
 }
 
+static inline const uint8_t *gs_esp32_frame_bytes(const gs_esp32_frame *frame)
+{
+    return frame->payload - GS_ESP32_HEADER_SIZE;
+}
+
+static inline size_t gs_esp32_frame_size(const gs_esp32_frame *frame)
+{
+    return (size_t)GS_ESP32_FRAME_OVERHEAD + frame->length;
+}
+
+static inline void gs_esp32_ble_tag(const uint8_t *key, const uint8_t *frame, size_t size, uint8_t *tag)
+{
+    uint8_t pad[64];
+    uint8_t inner[32];
+    uint8_t mac[32];
+    gs_esp32_sha256 context;
+    size_t i;
+    for (i = 0; i < 64; ++i) {
+        pad[i] = (uint8_t)((i < (size_t)GS_ESP32_KEY_SIZE ? key[i] : 0) ^ 0x36);
+    }
+    gs_esp32_sha256_init(&context);
+    gs_esp32_sha256_update(&context, pad, sizeof(pad));
+    gs_esp32_sha256_update(&context, (const uint8_t *)GS_ESP32_BLE_LABEL, GS_ESP32_BLE_LABEL_SIZE);
+    gs_esp32_sha256_update(&context, frame, size);
+    gs_esp32_sha256_final(&context, inner);
+    for (i = 0; i < 64; ++i) {
+        pad[i] = (uint8_t)((i < (size_t)GS_ESP32_KEY_SIZE ? key[i] : 0) ^ 0x5C);
+    }
+    gs_esp32_sha256_init(&context);
+    gs_esp32_sha256_update(&context, pad, sizeof(pad));
+    gs_esp32_sha256_update(&context, inner, sizeof(inner));
+    gs_esp32_sha256_final(&context, mac);
+    memcpy(tag, mac, GS_ESP32_TAG_SIZE);
+}
+
+static inline int gs_esp32_ble_tag_matches(const uint8_t *key, const uint8_t *frame, size_t size, const uint8_t *tag)
+{
+    uint8_t expected[GS_ESP32_TAG_SIZE];
+    uint8_t difference = 0;
+    size_t i;
+    gs_esp32_ble_tag(key, frame, size, expected);
+    for (i = 0; i < (size_t)GS_ESP32_TAG_SIZE; ++i) {
+        difference = (uint8_t)(difference | (expected[i] ^ tag[i]));
+    }
+    return difference == 0 ? 1 : 0;
+}
+
+static inline size_t gs_esp32_record_seal(uint8_t *record, size_t frame_size, size_t capacity, const uint8_t *key)
+{
+    if (frame_size > (size_t)GS_ESP32_MAX_FRAME || capacity < frame_size + GS_ESP32_TAG_SIZE) {
+        return 0;
+    }
+    gs_esp32_ble_tag(key, record, frame_size, record + frame_size);
+    return frame_size + GS_ESP32_TAG_SIZE;
+}
+
+static inline void gs_esp32_record_parser_reset(gs_esp32_record_parser *parser)
+{
+    parser->used = 0;
+    parser->ready = 0;
+    parser->dropped = 0;
+    parser->bad_frames = 0;
+}
+
+static inline void gs_esp32_record_parser_shift(gs_esp32_record_parser *parser, size_t count)
+{
+    if (count >= parser->used) {
+        parser->used = 0;
+        return;
+    }
+    memmove(parser->buffer, parser->buffer + count, parser->used - count);
+    parser->used -= count;
+}
+
+static inline void gs_esp32_record_parser_consume(gs_esp32_record_parser *parser)
+{
+    if (parser->ready > 0) {
+        gs_esp32_record_parser_shift(parser, parser->ready);
+        parser->ready = 0;
+    }
+}
+
+static inline void gs_esp32_record_parser_skip(gs_esp32_record_parser *parser)
+{
+    size_t next = 1;
+    while (next < parser->used && parser->buffer[next] != GS_ESP32_MAGIC0) {
+        ++next;
+    }
+    parser->dropped += (uint32_t)next;
+    gs_esp32_record_parser_shift(parser, next);
+}
+
+static inline size_t gs_esp32_record_parser_feed(gs_esp32_record_parser *parser, const uint8_t *data, size_t size)
+{
+    size_t room;
+    size_t take;
+    gs_esp32_record_parser_consume(parser);
+    room = sizeof(parser->buffer) - parser->used;
+    take = size < room ? size : room;
+    if (take > 0) {
+        memcpy(parser->buffer + parser->used, data, take);
+    }
+    parser->used += take;
+    return take;
+}
+
+static inline int gs_esp32_record_parser_next(gs_esp32_record_parser *parser, gs_esp32_frame *frame,
+                                              const uint8_t **tag)
+{
+    size_t total;
+    uint16_t length;
+    gs_esp32_record_parser_consume(parser);
+    for (;;) {
+        if (parser->used == 0) {
+            return 0;
+        }
+        if (parser->buffer[0] != GS_ESP32_MAGIC0) {
+            gs_esp32_record_parser_skip(parser);
+            continue;
+        }
+        if (parser->used < 2) {
+            return 0;
+        }
+        if (parser->buffer[1] != GS_ESP32_MAGIC1) {
+            gs_esp32_record_parser_skip(parser);
+            continue;
+        }
+        if (parser->used < (size_t)GS_ESP32_HEADER_SIZE) {
+            return 0;
+        }
+        length = gs_esp32_load_u16(parser->buffer + 4);
+        if (length > GS_ESP32_MAX_PAYLOAD) {
+            ++parser->bad_frames;
+            gs_esp32_record_parser_skip(parser);
+            continue;
+        }
+        total = (size_t)GS_ESP32_FRAME_OVERHEAD + length;
+        if (parser->used < total) {
+            return 0;
+        }
+        if (gs_esp32_crc16(parser->buffer + 2, (size_t)4 + length) !=
+            gs_esp32_load_u16(parser->buffer + GS_ESP32_HEADER_SIZE + length)) {
+            ++parser->bad_frames;
+            gs_esp32_record_parser_skip(parser);
+            continue;
+        }
+        if (parser->used < total + GS_ESP32_TAG_SIZE) {
+            return 0;
+        }
+        frame->type = parser->buffer[2];
+        frame->seq = parser->buffer[3];
+        frame->length = length;
+        frame->payload = parser->buffer + GS_ESP32_HEADER_SIZE;
+        *tag = parser->buffer + total;
+        parser->ready = total + GS_ESP32_TAG_SIZE;
+        return 1;
+    }
+}
+
 static inline size_t gs_esp32_encode_hello_req(uint8_t *out, size_t capacity, uint8_t version)
 {
     gs_esp32_writer writer = gs_esp32_writer_make(out, capacity);
@@ -899,6 +1091,23 @@ static inline int gs_esp32_decode_token(const uint8_t *payload, size_t size, uin
     return gs_esp32_reader_done(&reader);
 }
 
+static inline size_t gs_esp32_encode_pong(uint8_t *out, size_t capacity, uint32_t token, int8_t signal)
+{
+    gs_esp32_writer writer = gs_esp32_writer_make(out, capacity);
+    gs_esp32_put_u32(&writer, token);
+    gs_esp32_put_u8(&writer, (uint8_t)signal);
+    return gs_esp32_writer_done(&writer);
+}
+
+static inline int gs_esp32_decode_signal(const uint8_t *payload, size_t size, int8_t *signal)
+{
+    if (size < 5 || (int8_t)payload[4] == GS_ESP32_SIGNAL_UNKNOWN) {
+        return 0;
+    }
+    *signal = (int8_t)payload[4];
+    return 1;
+}
+
 static inline size_t gs_esp32_encode_set_baud(uint8_t *out, size_t capacity, const gs_esp32_set_baud *request)
 {
     gs_esp32_writer writer = gs_esp32_writer_make(out, capacity);
@@ -936,6 +1145,20 @@ static inline int gs_esp32_decode_wifi_set(const uint8_t *payload, size_t size, 
     if (wifi->ssid[0] == '\0') {
         return 0;
     }
+    return gs_esp32_reader_done(&reader);
+}
+
+static inline size_t gs_esp32_encode_key_set(uint8_t *out, size_t capacity, const uint8_t key[GS_ESP32_KEY_SIZE])
+{
+    gs_esp32_writer writer = gs_esp32_writer_make(out, capacity);
+    gs_esp32_put_bytes(&writer, key, GS_ESP32_KEY_SIZE);
+    return gs_esp32_writer_done(&writer);
+}
+
+static inline int gs_esp32_decode_key_set(const uint8_t *payload, size_t size, uint8_t key[GS_ESP32_KEY_SIZE])
+{
+    gs_esp32_reader reader = gs_esp32_reader_make(payload, size);
+    gs_esp32_take_bytes(&reader, key, GS_ESP32_KEY_SIZE);
     return gs_esp32_reader_done(&reader);
 }
 
@@ -1066,6 +1289,24 @@ static inline int gs_esp32_decode_error(const uint8_t *payload, size_t size, gs_
     gs_esp32_reader reader = gs_esp32_reader_make(payload, size);
     error->code = gs_esp32_take_u16(&reader);
     gs_esp32_take_text(&reader, error->text, GS_ESP32_MAX_TEXT);
+    return gs_esp32_reader_done(&reader);
+}
+
+static inline size_t gs_esp32_encode_advert(uint8_t *out, size_t capacity, const gs_esp32_advert *advert)
+{
+    gs_esp32_writer writer = gs_esp32_writer_make(out, capacity);
+    gs_esp32_put_bytes(&writer, advert->id, sizeof(advert->id));
+    gs_esp32_put_u8(&writer, advert->chip);
+    gs_esp32_put_u8(&writer, advert->flags);
+    return gs_esp32_writer_done(&writer);
+}
+
+static inline int gs_esp32_decode_advert(const uint8_t *data, size_t size, gs_esp32_advert *advert)
+{
+    gs_esp32_reader reader = gs_esp32_reader_make(data, size);
+    gs_esp32_take_bytes(&reader, advert->id, sizeof(advert->id));
+    advert->chip = gs_esp32_take_u8(&reader);
+    advert->flags = gs_esp32_take_u8(&reader);
     return gs_esp32_reader_done(&reader);
 }
 

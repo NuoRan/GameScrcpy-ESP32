@@ -110,7 +110,16 @@ Bytes encodePayload(const std::string& kind, const Json& fields)
                                        .rt = fields.at("rt").get<std::uint8_t>()};
         size = gs_esp32_encode_gamepad(buffer.data(), buffer.size(), &gamepad);
     } else if (kind == "ping" || kind == "pong") {
-        size = gs_esp32_encode_token(buffer.data(), buffer.size(), fields.at("token").get<std::uint32_t>());
+        if (fields.contains("signal")) {
+            size = gs_esp32_encode_pong(buffer.data(), buffer.size(), fields.at("token").get<std::uint32_t>(),
+                                        fields.at("signal").get<std::int8_t>());
+        } else {
+            size = gs_esp32_encode_token(buffer.data(), buffer.size(), fields.at("token").get<std::uint32_t>());
+        }
+    } else if (kind == "key_set") {
+        std::uint8_t key[GS_ESP32_KEY_SIZE]{};
+        copyBytes(key, fromHex(fields.at("key").get<std::string>()));
+        size = gs_esp32_encode_key_set(buffer.data(), buffer.size(), key);
     } else if (kind == "set_baud") {
         const gs_esp32_set_baud request{.baud = fields.at("baud").get<std::uint32_t>(),
                                         .token = fields.at("token").get<std::uint32_t>()};
@@ -197,6 +206,10 @@ bool decodes(const std::string& kind, const Bytes& payload)
         gs_esp32_set_baud request{};
         return gs_esp32_decode_set_baud(data, size, &request) != 0;
     }
+    if (kind == "key_set") {
+        std::uint8_t key[GS_ESP32_KEY_SIZE]{};
+        return gs_esp32_decode_key_set(data, size, key) != 0;
+    }
     if (kind == "wifi_set") {
         gs_esp32_wifi_set wifi{};
         return gs_esp32_decode_wifi_set(data, size, &wifi) != 0;
@@ -275,6 +288,15 @@ void checkDecoded(const std::string& kind, const Bytes& payload, const Json& fie
         std::uint32_t token = 0;
         REQUIRE(gs_esp32_decode_token(data, size, &token));
         CHECK(token == fields.at("token").get<std::uint32_t>());
+        if (fields.contains("signal")) {
+            std::int8_t signal = 0;
+            REQUIRE(gs_esp32_decode_signal(data, size, &signal));
+            CHECK(signal == fields.at("signal").get<int>());
+        }
+    } else if (kind == "key_set") {
+        std::uint8_t key[GS_ESP32_KEY_SIZE]{};
+        REQUIRE(gs_esp32_decode_key_set(data, size, key));
+        CHECK(bytesOf(key) == fromHex(fields.at("key").get<std::string>()));
     } else if (kind == "set_baud") {
         gs_esp32_set_baud request{};
         REQUIRE(gs_esp32_decode_set_baud(data, size, &request));
@@ -349,6 +371,44 @@ Parsed parse(const Bytes& data, std::size_t chunk)
     parsed.bad = parser.bad_frames;
     parsed.dropped = parser.dropped;
     return parsed;
+}
+
+struct Records {
+    std::vector<Bytes> frames;
+    std::uint32_t badTags = 0;
+    std::uint32_t bad = 0;
+    std::uint32_t dropped = 0;
+};
+
+Records parseRecords(const Bytes& data, std::size_t chunk, const Bytes& key)
+{
+    gs_esp32_record_parser parser{};
+    gs_esp32_record_parser_reset(&parser);
+    Records parsed;
+    std::size_t at = 0;
+    while (at < data.size()) {
+        const std::size_t offered = std::min(chunk, data.size() - at);
+        at += gs_esp32_record_parser_feed(&parser, data.data() + at, offered);
+        gs_esp32_frame frame{};
+        const std::uint8_t* tag = nullptr;
+        while (gs_esp32_record_parser_next(&parser, &frame, &tag)) {
+            const std::uint8_t* start = gs_esp32_frame_bytes(&frame);
+            const std::size_t size = gs_esp32_frame_size(&frame);
+            if (gs_esp32_ble_tag_matches(key.data(), start, size, tag)) {
+                parsed.frames.emplace_back(start, start + size);
+            } else {
+                ++parsed.badTags;
+            }
+        }
+    }
+    parsed.bad = parser.bad_frames;
+    parsed.dropped = parser.dropped;
+    return parsed;
+}
+
+Bytes textOf(const Json& value)
+{
+    return fromHex(value.get<std::string>());
 }
 
 }
@@ -524,6 +584,113 @@ TEST_CASE("a Wi-Fi datagram carries a 16-byte HMAC-SHA256 tag; a wrong tag or ke
         CHECK_FALSE(gs_esp32_datagram_open(datagram.data(), GS_ESP32_FRAME_OVERHEAD + GS_ESP32_TAG_SIZE - 1,
                                            key.data(), &opened));
     }
+}
+
+TEST_CASE("ADR-0112: the Bluetooth UUIDs in the header are the ones of the specification, in the order they go on air")
+{
+    const Json& uuids = vectors().at("bluetooth").at("uuids");
+    const std::array<std::uint8_t, 16> service{GS_ESP32_BLE_SERVICE_UUID128};
+    const std::array<std::uint8_t, 16> receive{GS_ESP32_BLE_RX_UUID128};
+    const std::array<std::uint8_t, 16> send{GS_ESP32_BLE_TX_UUID128};
+    CHECK(Bytes(service.begin(), service.end()) == textOf(uuids.at("service").at("bytes")));
+    CHECK(Bytes(receive.begin(), receive.end()) == textOf(uuids.at("rx").at("bytes")));
+    CHECK(Bytes(send.begin(), send.end()) == textOf(uuids.at("tx").at("bytes")));
+    CHECK(uuids.at("service").at("text") == GS_ESP32_BLE_SERVICE_UUID);
+    CHECK(uuids.at("rx").at("text") == GS_ESP32_BLE_RX_UUID);
+    CHECK(uuids.at("tx").at("text") == GS_ESP32_BLE_TX_UUID);
+}
+
+TEST_CASE("ADR-0112: a Bluetooth record is the frame and a tag over GS-BLE and the frame, which no Wi-Fi tag matches")
+{
+    REQUIRE_FALSE(vectors().at("bluetooth").at("tags").empty());
+    for (const Json& vector : vectors().at("bluetooth").at("tags")) {
+        INFO(vector.at("name").get<std::string>());
+        const Bytes key = textOf(vector.at("key"));
+        const Bytes frame = textOf(vector.at("frame"));
+        const Bytes tag = textOf(vector.at("tag"));
+        const Bytes udpTag = textOf(vector.at("udpTag"));
+        REQUIRE(key.size() == GS_ESP32_KEY_SIZE);
+
+        std::uint8_t computed[GS_ESP32_TAG_SIZE]{};
+        gs_esp32_ble_tag(key.data(), frame.data(), frame.size(), computed);
+        CHECK(bytesOf(computed) == tag);
+        CHECK(gs_esp32_ble_tag_matches(key.data(), frame.data(), frame.size(), tag.data()));
+        CHECK_FALSE(gs_esp32_ble_tag_matches(key.data(), frame.data(), frame.size(), udpTag.data()));
+        gs_esp32_tag(key.data(), frame.data(), frame.size(), computed);
+        CHECK(bytesOf(computed) == udpTag);
+
+        std::array<std::uint8_t, GS_ESP32_MAX_RECORD> sealed{};
+        std::copy(frame.begin(), frame.end(), sealed.begin());
+        const std::size_t sealedSize = gs_esp32_record_seal(sealed.data(), frame.size(), sealed.size(), key.data());
+        CHECK(Bytes(sealed.begin(), sealed.begin() + static_cast<std::ptrdiff_t>(sealedSize)) ==
+              textOf(vector.at("record")));
+        CHECK(gs_esp32_record_seal(sealed.data(), frame.size(), frame.size() + GS_ESP32_TAG_SIZE - 1, key.data()) == 0);
+    }
+}
+
+TEST_CASE("ADR-0112: Bluetooth records are found however writes and notifications cut them, and a wrong tag drops "
+          "only its own record")
+{
+    REQUIRE_FALSE(vectors().at("bluetooth").at("records").empty());
+    for (const Json& vector : vectors().at("bluetooth").at("records")) {
+        INFO(vector.at("name").get<std::string>());
+        const Bytes key = textOf(vector.at("key"));
+        const Bytes data = textOf(vector.at("bytes"));
+        std::vector<Bytes> expected;
+        for (const Json& frame : vector.at("frames")) {
+            expected.push_back(textOf(frame));
+        }
+        for (const std::size_t chunk : {std::size_t{1}, std::size_t{7}, std::size_t{20}, std::size_t{244},
+                                        std::size_t{GS_ESP32_MAX_RECORD}}) {
+            CAPTURE(chunk);
+            const Records parsed = parseRecords(data, chunk, key);
+            CHECK(parsed.frames == expected);
+            CHECK(parsed.badTags == vector.at("badTags").get<std::uint32_t>());
+            CHECK(parsed.bad == vector.at("badFrames").get<std::uint32_t>());
+            CHECK(parsed.dropped == vector.at("dropped").get<std::uint32_t>());
+        }
+    }
+}
+
+TEST_CASE("ADR-0112: the scan response names the board, its chip and whether it has a key or a computer already")
+{
+    REQUIRE_FALSE(vectors().at("bluetooth").at("adverts").empty());
+    for (const Json& vector : vectors().at("bluetooth").at("adverts")) {
+        INFO(vector.at("name").get<std::string>());
+        const Bytes data = textOf(vector.at("data"));
+        const Json& fields = vector.at("fields");
+        gs_esp32_advert advert{};
+        REQUIRE(gs_esp32_decode_advert(data.data(), data.size(), &advert));
+        CHECK(bytesOf(advert.id) == textOf(fields.at("id")));
+        CHECK(advert.chip == fields.at("chip").get<int>());
+        CHECK(advert.flags == fields.at("flags").get<int>());
+        std::array<std::uint8_t, GS_ESP32_ADVERT_SIZE> encoded{};
+        REQUIRE(gs_esp32_encode_advert(encoded.data(), encoded.size(), &advert) == GS_ESP32_ADVERT_SIZE);
+        CHECK(Bytes(encoded.begin(), encoded.end()) == Bytes(data.begin(), data.begin() + GS_ESP32_ADVERT_SIZE));
+    }
+    gs_esp32_advert none{};
+    const std::array<std::uint8_t, GS_ESP32_ADVERT_SIZE - 1> cut{};
+    CHECK_FALSE(gs_esp32_decode_advert(cut.data(), cut.size(), &none));
+    std::array<std::uint8_t, GS_ESP32_ADVERT_SIZE - 1> small{};
+    CHECK(gs_esp32_encode_advert(small.data(), small.size(), &none) == 0);
+}
+
+TEST_CASE("ADR-0112: a PONG without the signal byte, or with 127, has no signal; KEY_SET carries exactly the key")
+{
+    std::array<std::uint8_t, 5> payload{};
+    REQUIRE(gs_esp32_encode_token(payload.data(), payload.size(), 7) == 4);
+    std::int8_t signal = 0;
+    CHECK_FALSE(gs_esp32_decode_signal(payload.data(), 4, &signal));
+    REQUIRE(gs_esp32_encode_pong(payload.data(), payload.size(), 7, GS_ESP32_SIGNAL_UNKNOWN) == 5);
+    CHECK_FALSE(gs_esp32_decode_signal(payload.data(), payload.size(), &signal));
+    REQUIRE(gs_esp32_encode_pong(payload.data(), payload.size(), 7, -90) == 5);
+    REQUIRE(gs_esp32_decode_signal(payload.data(), payload.size(), &signal));
+    CHECK(signal == -90);
+    CHECK(gs_esp32_encode_pong(payload.data(), 4, 7, -90) == 0);
+
+    std::uint8_t key[GS_ESP32_KEY_SIZE]{};
+    std::array<std::uint8_t, GS_ESP32_KEY_SIZE - 1> small{};
+    CHECK(gs_esp32_encode_key_set(small.data(), small.size(), key) == 0);
 }
 
 TEST_CASE("the old QineTouch packet is F4, tip, id, X and Y as 32-bit little endian, then the contact count")
