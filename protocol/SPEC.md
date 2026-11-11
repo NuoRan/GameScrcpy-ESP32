@@ -1,9 +1,9 @@
 # ESP32 触控盒协议 v2
 
-GameScrcpy（电脑）与 ESP32 触控盒（固件 `firmware/esp32/`）之间的协议。决定与背景见 ADR-0102；功能清单 HID-004。
+电脑上的 ESP32 触控盒扩展与 ESP32 触控盒（固件 `firmware/`）之间的协议。它原是 GameScrcpy 2.0 内置的 ESP32 触控盒的协议，搬到这个社区项目时没有改动。
 
 - 固件与电脑共用同一个 C99 头文件 `gs_esp32_protocol.h`（常量、消息结构、编解码函数、CRC、HMAC 标签）。
-- 金标准向量 `vectors.json` 由 `gen_vectors.py`（只用 Python 标准库，按本规范独立实现）生成，电脑端测试 `gs_esp32_tests` 逐字节核对。改协议的顺序：本文件 → `gen_vectors.py`（运行 `python protocol/esp32/gen_vectors.py`）→ `gs_esp32_protocol.h` → 测试。向量不手改。
+- 金标准向量 `vectors.json` 由 `gen_vectors.py`（只用 Python 标准库，按本规范独立实现）生成，电脑端测试 `gs_esp32_tests` 逐字节核对。改协议的顺序：本文件 → `gen_vectors.py`（运行 `python protocol/gen_vectors.py`）→ `gs_esp32_protocol.h` → 测试。向量不手改。
 - 本文所有多字节整数都是小端序。
 
 ## 1. 连接方式
@@ -111,7 +111,7 @@ WIFI_SET、WIFI_FORGET、SET_NAME 成功后 ESP32 回一个新的 HELLO（反映
 ## 7. Wi-Fi 与标签
 
 - 每个 UDP 数据报 = 一个完整的帧 + 16 字节标签；标签 = HMAC-SHA256（密钥，整帧字节）的前 16 字节。标签不对或长度不对的数据报直接丢掉，不回任何东西。
-- 密钥 32 字节，由电脑在设置 Wi-Fi 时随机生成，经串口的 WIFI_SET 交给 ESP32（存在 NVS），电脑把它记在数据目录的 `esp32-boards.json`（按 MAC 记）。没有密钥的板子不收任何 UDP。
+- 密钥 32 字节，由电脑在设置 Wi-Fi 时随机生成，经串口的 WIFI_SET 交给 ESP32（存在 NVS），扩展把它记在 GameScrcpy 给扩展的存储里（键 `boards`，按 MAC 记）。没有密钥的板子不收任何 UDP。
 - ESP32 回复发到最近一个合法数据报的来源地址与端口。
 - mDNS：服务 `_gs-esp32._udp`，端口 4545，实例名是板子的名字；TXT 记录 `id`（MAC 的 12 位小写十六进制）、`name`（名字）、`chip`（芯片型号，如 `esp32s3`）。电脑按 `id` 找密钥；手动填地址时依次试已知的密钥。
 
@@ -134,7 +134,7 @@ WIFI_SET、WIFI_FORGET、SET_NAME 成功后 ESP32 回一个新的 HELLO（反映
 
 ## 9. 刷写
 
-刷写走 ESP32 ROM 的串口下载协议（乐鑫公开的串口协议文档；不是本协议），由电脑端 `src/espflash` 实现。进入下载模式的方法：
+刷写走 ESP32 ROM 的串口下载协议（乐鑫公开的串口协议文档；不是本协议），由电脑端 `native/espflash` 实现。进入下载模式的方法：
 
 1. 板子跑着本固件时，发 ENTER_DOWNLOAD；
 2. USB 转串口芯片：经典的 DTR / RTS 复位时序（EN 拉低，再在 IO0 拉低时放开 EN）；

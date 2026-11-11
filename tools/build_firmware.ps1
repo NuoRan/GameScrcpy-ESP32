@@ -8,9 +8,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repository = Split-Path -Parent $PSScriptRoot
-$project = Join-Path $repository 'firmware\esp32'
+$project = Join-Path $repository 'firmware'
 $release = Join-Path $project 'release'
-$buildRoot = Join-Path $repository 'build\esp32-firmware'
+$buildRoot = Join-Path $repository 'build\firmware'
 $manifestPath = Join-Path $release 'firmware.json'
 $chipIds = @{ esp32 = 0; esp32s2 = 2; esp32c3 = 5; esp32s3 = 9; esp32c6 = 13; esp32p4 = 18 }
 $flashSize = '4MB'

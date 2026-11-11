@@ -36,6 +36,6 @@ endif()
 
 idf_component_register(
     SRCS ${gs_sources}
-    INCLUDE_DIRS "." "${CMAKE_CURRENT_LIST_DIR}/../../../protocol/esp32"
+    INCLUDE_DIRS "." "${CMAKE_CURRENT_LIST_DIR}/../../protocol"
     REQUIRES ${gs_requires}
 )

@@ -246,23 +246,30 @@ class Board:
 
 
 def register(folder: Path, args: argparse.Namespace) -> None:
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / "esp32-boards.json"
-    document = {"format": "gamescrcpy.esp32-boards", "version": 1, "boards": {}}
+    store = folder / "extensions" / ".store"
+    store.mkdir(parents=True, exist_ok=True)
+    path = store / "community.esp32.json"
+    values: dict = {}
     if path.exists():
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
-            if loaded.get("format") == document["format"] and isinstance(loaded.get("boards"), dict):
-                document["boards"] = loaded["boards"]
+            if isinstance(loaded, dict):
+                values = loaded
         except (OSError, ValueError):
             pass
+    document = {"format": "community.esp32-boards", "version": 1, "boards": {}}
+    current = values.get("boards")
+    if isinstance(current, dict) and current.get("format") == document["format"] \
+            and isinstance(current.get("boards"), dict):
+        document["boards"] = current["boards"]
     chip_name = CHIPS[args.chip][1]
     document["boards"][args.mac] = {
         "name": args.name or f"{chip_name}（模拟）",
         "key": args.key,
         "address": args.host,
     }
-    path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    values["boards"] = document
+    path.write_text(json.dumps(values, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
     print(f"registered board {args.mac} in {path}", flush=True)
 
 
@@ -280,7 +287,9 @@ def main() -> int:
     parser.add_argument("--phone-delay", type=float, default=3.0,
                         help="seconds until the phone side reports connected (default 3)")
     parser.add_argument("--register", type=Path, default=None,
-                        help="data folder (GS_DATA_DIR) to write the board and its key into esp32-boards.json")
+                        help="GameScrcpy's data folder (GS_DATA_DIR, or %%APPDATA%%\\GameScrcpy) to put the board and "
+                             "its key into the store of the extension community.esp32; run it while GameScrcpy is "
+                             "closed")
     args = parser.parse_args()
     if len(bytes.fromhex(args.key)) != 32:
         parser.error("--key must be 64 hex digits")
