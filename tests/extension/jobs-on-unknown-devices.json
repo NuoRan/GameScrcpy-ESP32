@@ -1,0 +1,39 @@
+{
+  "format": "gamescrcpy.ext-test",
+  "version": 1,
+  "name": "Jobs on a device that is neither a board nor a serial port fail with a reason, and the panels hear about it",
+  "host": {
+    "settings": { "port": "auto", "link": "serial", "address": "" },
+    "serialPorts": []
+  },
+  "steps": [
+    {
+      "job": "diagnose",
+      "args": { "device": "nonsense" },
+      "expect": { "outcome": "failed", "error": { "nonEmpty": true }, "within": 3000 }
+    },
+    {
+      "event": "board.diagnosed",
+      "expect": { "value": { "device": "nonsense", "ok": false }, "match": "subset", "within": 3000 }
+    },
+    {
+      "job": "flash",
+      "args": { "device": "nonsense" },
+      "expect": { "outcome": "failed", "error": { "nonEmpty": true }, "within": 3000 }
+    },
+    {
+      "event": "flash.done",
+      "expect": { "value": { "device": "nonsense", "ok": false }, "match": "subset", "within": 3000 }
+    },
+    {
+      "job": "wifi",
+      "args": { "device": "serial-com7", "ssid": "Home", "password": "secret" },
+      "expect": { "outcome": "failed", "error": { "nonEmpty": true }, "within": 3000 }
+    },
+    {
+      "job": "rename",
+      "args": { "device": "serial-com7", "name": "Desk box" },
+      "expect": { "outcome": "failed", "error": { "nonEmpty": true }, "within": 3000 }
+    }
+  ]
+}

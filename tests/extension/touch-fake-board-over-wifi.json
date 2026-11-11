@@ -1,0 +1,58 @@
+{
+  "format": "gamescrcpy.ext-test",
+  "version": 1,
+  "name": "Touches, a key and the mouse reach a fake board over Wi-Fi, and closing lets every finger go",
+  "requires": [
+    "python tools/fake_esp32.py --port 45455 --chip s3 --phone usb --phone-delay 0"
+  ],
+  "host": {
+    "settings": { "port": "auto", "link": "serial", "address": "" },
+    "serialPorts": [],
+    "store": {
+      "boards": {
+        "format": "community.esp32-boards",
+        "version": 1,
+        "boards": {
+          "fa4e00e5032a": {
+            "name": "ESP32-S3（模拟）",
+            "key": "f8d5128ed08841547e99244af680f1f01d2041340af607ffe8cdeae92076da21",
+            "address": "127.0.0.1"
+          }
+        }
+      }
+    },
+    "devices": [
+      { "serial": "emulator-5554", "settings": { "link": "wifi", "address": "127.0.0.1:45455" } }
+    ]
+  },
+  "steps": [
+    {
+      "touch": "open",
+      "method": "esp32",
+      "device": "emulator-5554",
+      "expect": { "status": "ok", "within": 5000 }
+    },
+    {
+      "touch": "frame",
+      "rotation": 0,
+      "contacts": [{ "id": 0, "action": "down", "x": 0.5, "y": 0.5 }],
+      "expect": { "status": "ok" }
+    },
+    {
+      "touch": "frame",
+      "rotation": 0,
+      "contacts": [{ "id": 0, "action": "move", "x": 0.6, "y": 0.5 }],
+      "expect": { "status": "ok" }
+    },
+    {
+      "touch": "frame",
+      "rotation": 0,
+      "contacts": [{ "id": 0, "action": "up", "x": 0.6, "y": 0.5 }],
+      "expect": { "status": "ok" }
+    },
+    { "touch": "key", "keycode": 4, "down": true, "expect": { "status": "ok" } },
+    { "touch": "key", "keycode": 4, "down": false, "expect": { "status": "ok" } },
+    { "touch": "mouse", "buttons": 0, "dx": 10, "dy": -5, "wheel": 0, "expect": { "status": "ok" } },
+    { "touch": "close" }
+  ]
+}

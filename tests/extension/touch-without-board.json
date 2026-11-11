@@ -1,0 +1,21 @@
+{
+  "format": "gamescrcpy.ext-test",
+  "version": 1,
+  "name": "The touch method does not open for a phone whose board has never been set up for Wi-Fi, so touches go the normal way",
+  "host": {
+    "settings": { "port": "auto", "link": "serial", "address": "" },
+    "serialPorts": [],
+    "devices": [
+      { "serial": "emulator-5554", "settings": { "link": "wifi", "address": "127.0.0.1:45999" } }
+    ]
+  },
+  "steps": [
+    {
+      "touch": "open",
+      "method": "esp32",
+      "device": "emulator-5554",
+      "expect": { "status": "failed", "within": 5000 }
+    },
+    { "devices": "boards", "expect": { "status": "ok", "result": [] } }
+  ]
+}

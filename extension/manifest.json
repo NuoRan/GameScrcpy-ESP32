@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "id": "community.esp32",
+  "version": "1.0.0",
+  "name": "ESP32 touch box",
+  "description": "An ESP32 board on the phone's USB port or Bluetooth becomes its touch screen, keyboard, mouse and gamepad, so the phone can be controlled without USB debugging. The extension finds the boards, shows them on the devices page, flashes their firmware and sets up their Wi-Fi.",
+  "authors": ["GameScrcpy 社区"],
+  "license": "Apache-2.0",
+  "requires": {
+    "native": "^1.0",
+    "script": "^1.0",
+    "panel": "^1.0",
+    "help": "^1.0"
+  },
+  "contributes": {
+    "native": {
+      "dll": "esp32.dll",
+      "touchMethods": [
+        {
+          "name": "esp32",
+          "title": "ESP32",
+          "description": "Touches, keys, the mouse and the gamepad go through the ESP32 touch box. Choose its serial port or Wi-Fi in this phone's settings of the extension."
+        }
+      ],
+      "deviceProviders": [
+        { "name": "boards", "title": "ESP32 touch boxes", "kinds": ["touchBox"] }
+      ],
+      "jobs": [
+        {
+          "name": "flash",
+          "title": "Flash firmware",
+          "description": "Writes the firmware that comes with the extension to a board: device is the board's id or its serial port, such as COM7.",
+          "params": [{ "name": "device", "type": "string" }],
+          "returns": "json",
+          "permissions": ["hardware"],
+          "most": 1
+        },
+        {
+          "name": "wifi",
+          "title": "Set up Wi-Fi",
+          "description": "Sends a network name and password to a board on its serial port, with a key only this computer knows; an empty network name makes the board forget its Wi-Fi.",
+          "params": [
+            { "name": "device", "type": "string" },
+            { "name": "ssid", "type": "string" },
+            { "name": "password", "type": "string" }
+          ],
+          "returns": "json",
+          "permissions": ["hardware"],
+          "most": 1
+        },
+        {
+          "name": "rename",
+          "title": "Rename the board",
+          "description": "Gives a board a new name of 1 to 32 bytes: its Bluetooth name, its name on the network and in GameScrcpy.",
+          "params": [
+            { "name": "device", "type": "string" },
+            { "name": "name", "type": "string" }
+          ],
+          "returns": "json",
+          "permissions": ["hardware"],
+          "most": 1
+        },
+        {
+          "name": "diagnose",
+          "title": "Diagnose",
+          "description": "Asks a board or a serial port what it is and says what is wrong: device is the board's id or a serial port such as COM7.",
+          "params": [{ "name": "device", "type": "string" }],
+          "returns": "json",
+          "permissions": ["hardware"],
+          "most": 2
+        }
+      ],
+      "nodes": [
+        { "name": "boards", "returns": "json", "description": "The boards found now, each with its id, state, chip, firmware, phone and Wi-Fi." },
+        { "name": "ports", "returns": "json", "description": "The serial ports of this computer, each with its name, title and kind." },
+        { "name": "firmware", "returns": "json", "description": "The firmware that comes with the extension: its version and the chips it has images for." },
+        { "name": "language", "returns": "string", "description": "The language of the texts the extension gives, zh_CN or en." },
+        { "name": "problem", "returns": "string", "description": "Why the last search found no board, or empty text." },
+        {
+          "name": "tap",
+          "params": [{ "name": "device", "type": "string" }],
+          "returns": "boolean",
+          "description": "Taps the middle of the phone's screen once through the board, to check that the phone side works."
+        },
+        {
+          "name": "disconnect",
+          "params": [{ "name": "device", "type": "string" }],
+          "returns": "boolean",
+          "description": "Lets go of a board until it is plugged in again or the boards are looked for again."
+        },
+        { "name": "rescan", "returns": "boolean", "description": "Looks for boards again, the ones let go of too." }
+      ]
+    },
+    "scripts": [{ "name": "panel", "entry": "scripts/panel.ts", "run": "app" }],
+    "panels": [
+      { "name": "main", "title": "ESP32 touch box", "icon": "svg:icons/board.svg", "where": "extension", "script": "panel" },
+      { "name": "board", "title": "ESP32 settings", "icon": "svg:icons/board.svg", "where": "device", "script": "panel" }
+    ],
+    "help": [
+      {
+        "id": "esp32",
+        "title": "ESP32 touch box",
+        "file": "help/esp32.md",
+        "locales": { "zh_CN": "help/esp32.zh_CN.md" },
+        "icon": "svg:icons/board.svg"
+      }
+    ]
+  },
+  "settings": [
+    {
+      "key": "port",
+      "type": "text",
+      "title": "ESP32 serial port",
+      "description": "The serial port of the ESP32 touch box, such as COM7. auto tries the Espressif, CH34x and CP210x ports one after another.",
+      "keywords": "esp32 serial port com usb touch box",
+      "default": "auto",
+      "maxLength": 16,
+      "scope": "device"
+    },
+    {
+      "key": "link",
+      "type": "choice",
+      "title": "ESP32 connection",
+      "description": "Serial uses the board's USB serial port, with the least delay. Wi-Fi needs the board on the same network and adds 1 to 3 ms.",
+      "keywords": "esp32 wifi wireless serial udp connection touch box",
+      "choices": ["serial", "wifi"],
+      "default": "serial",
+      "scope": "device"
+    },
+    {
+      "key": "address",
+      "type": "text",
+      "title": "ESP32 address",
+      "description": "The board's address on the network. Empty finds it automatically.",
+      "keywords": "esp32 wifi address ip mdns touch box",
+      "default": "",
+      "maxLength": 255,
+      "scope": "device"
+    }
+  ],
+  "permissions": [
+    { "name": "hardware", "reason": "Talks to the ESP32 boards over their serial ports and flashes their firmware." },
+    { "name": "devices.provide", "reason": "Shows the ESP32 boards on the devices page." },
+    { "name": "network", "reason": "Reaches boards over Wi-Fi on your local network.", "hosts": ["*.local"] }
+  ],
+  "l10n": {
+    "zh_CN": {
+      "name": "ESP32 触控盒",
+      "description": "接在手机 USB 口或蓝牙上的 ESP32 开发板充当手机的触摸屏、键盘、鼠标和手柄，不开 USB 调试也能控制手机。扩展会找到开发板、把它们列在设备页、刷写固件并设置 Wi-Fi。",
+      "touchMethods.esp32.title": "ESP32",
+      "touchMethods.esp32.description": "触控、按键、鼠标和手柄经 ESP32 触控盒发给手机。串口或 Wi-Fi 在这台手机的扩展设置里选。",
+      "deviceProviders.boards.title": "ESP32 触控盒",
+      "jobs.flash.title": "刷写固件",
+      "jobs.flash.description": "把扩展附带的固件写入开发板：device 是开发板的编号或它的串口，例如 COM7。",
+      "jobs.wifi.title": "设置 Wi-Fi",
+      "jobs.wifi.description": "把网络名称和密码经串口发给开发板，同时给一个只有这台电脑知道的密钥；网络名称留空则让开发板忘记 Wi-Fi。",
+      "jobs.rename.title": "给开发板改名",
+      "jobs.rename.description": "给开发板起一个 1～32 字节的新名字：它的蓝牙名、网络上的名字和在 GameScrcpy 里的名字。",
+      "jobs.diagnose.title": "诊断",
+      "jobs.diagnose.description": "询问开发板或串口是什么，并说明哪里不对：device 是开发板的编号或串口，例如 COM7。",
+      "nodes.boards.description": "现在找到的开发板，每块带编号、状态、芯片、固件、手机与 Wi-Fi。",
+      "nodes.ports.description": "这台电脑的串口，每个带名字、标题与种类。",
+      "nodes.firmware.description": "扩展附带的固件：版本以及有镜像的芯片。",
+      "nodes.language.description": "扩展给出的文字的语言，zh_CN 或 en。",
+      "nodes.problem.description": "上一次查找为什么没有找到开发板，没有问题时为空。",
+      "nodes.tap.description": "经开发板在手机屏幕中央点一下，用来确认手机那头接好了。",
+      "nodes.disconnect.description": "放开一块开发板，直到它重新插上或者重新查找开发板。",
+      "nodes.rescan.description": "重新查找开发板，包括放开过的。",
+      "panels.main.title": "ESP32 触控盒",
+      "panels.board.title": "ESP32 设置",
+      "help.esp32.title": "ESP32 触控盒",
+      "settings.port.title": "ESP32 串口",
+      "settings.port.description": "ESP32 触控盒的串口，例如 COM7。auto 会依次试乐鑫、CH34x、CP210x 的串口。",
+      "settings.port.keywords": "esp32 串口 com usb 触控盒",
+      "settings.link.title": "ESP32 连接方式",
+      "settings.link.description": "串口走开发板的 USB 串口，延迟最低。Wi-Fi 要开发板在同一个网络里，延迟多 1～3 毫秒。",
+      "settings.link.keywords": "esp32 wifi 无线 串口 udp 连接 触控盒",
+      "settings.link.choices.serial": "串口",
+      "settings.link.choices.wifi": "Wi-Fi",
+      "settings.address.title": "ESP32 地址",
+      "settings.address.description": "开发板在网络上的地址。留空则自动查找。",
+      "settings.address.keywords": "esp32 wifi 地址 ip mdns 触控盒"
+    }
+  }
+}

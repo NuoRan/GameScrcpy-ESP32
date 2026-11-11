@@ -1,0 +1,22 @@
+{
+  "format": "gamescrcpy.ext-test",
+  "version": 1,
+  "name": "Without any board the nodes answer, the provider lists nothing and actions on unknown boards are refused",
+  "host": {
+    "settings": { "port": "auto", "link": "serial", "address": "" },
+    "serialPorts": []
+  },
+  "steps": [
+    { "call": "boards", "expect": { "status": "ok", "result": [] } },
+    { "call": "ports", "expect": { "status": "ok", "result": [] } },
+    { "call": "firmware", "expect": { "status": "ok", "result": { "version": "1.0.2" }, "match": "subset" } },
+    { "call": "language", "expect": { "status": "ok", "oneOf": ["en", "zh_CN"] } },
+    { "call": "problem", "expect": { "status": "ok", "type": "string" } },
+    { "call": "tap", "args": ["serial-com7"], "expect": { "status": "ok", "result": false } },
+    { "call": "disconnect", "args": ["serial-com7"], "expect": { "status": "ok", "result": false } },
+    { "call": "rescan", "expect": { "status": "ok", "result": true } },
+    { "devices": "boards", "expect": { "status": "ok", "result": [] } },
+    { "act": { "provider": "boards", "device": "serial-com7", "action": "tap" }, "expect": { "status": "badArgument" } },
+    { "claimWanted": { "resource": "serial:COM9", "by": "Your logic" }, "expect": { "status": "ok" } }
+  ]
+}
