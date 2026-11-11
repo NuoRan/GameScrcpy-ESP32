@@ -1,0 +1,35 @@
+{
+  "format": "gamescrcpy.ext-test",
+  "version": 1,
+  "name": "Bluetooth without a paired board: the connection takes ble, a phone on Bluetooth touches the normal way, the jobs refuse unknown devices and a board wanted elsewhere is let go",
+  "settings": { "port": "auto", "link": "ble", "address": "" },
+  "steps": [
+    { "do": "call", "node": "boards", "expect": { "value": [] } },
+    { "do": "call", "node": "bluetooth", "expect": { "value": { "scanning": false, "paired": [] } } },
+    { "do": "devices", "provider": "boards", "expect": { "devices": [], "count": 0 } },
+    { "name": "no board is paired", "do": "touch.open", "method": "esp32", "expect": { "opened": false } },
+    {
+      "do": "settings",
+      "deviceSettings": { "mock-phone": { "link": "ble", "address": "AA:BB:CC:DD:EE:FF" } },
+      "expect": { "changed": ["link", "address"] }
+    },
+    { "name": "this computer has no key for the board", "do": "touch.open", "method": "esp32", "expect": { "opened": false } },
+    {
+      "do": "settings",
+      "deviceSettings": { "mock-phone": { "address": "not an address" } },
+      "expect": { "changed": ["address"] }
+    },
+    { "name": "the address is not a Bluetooth address", "do": "touch.open", "method": "esp32", "expect": { "opened": false } },
+    { "do": "job", "job": "pair", "args": { "device": "nonsense" }, "expect": { "error": "GS-API-065" } },
+    { "do": "job", "job": "unpair", "args": { "device": "nonsense" }, "expect": { "error": "GS-API-065" } },
+    { "do": "job", "job": "pair", "args": {}, "expect": { "error": "GS-API-061" } },
+    { "do": "holder", "resource": "ble:AA:BB:CC:DD:EE:FF", "by": "Phone app", "yields": false },
+    {
+      "do": "claim.want",
+      "resource": "ble:AA:BB:CC:DD:EE:FF",
+      "by": "Phone app",
+      "expect": { "held": false, "yielded": true, "released": false }
+    },
+    { "do": "claims", "expect": { "held": [], "holders": [{ "resource": "ble:AA:BB:CC:DD:EE:FF", "by": "Phone app", "yields": false }] } }
+  ]
+}
