@@ -99,8 +99,8 @@ int32_t listBoards(void*, gs_ext_result* out)
 
 int32_t actOnBoard(void*, const char* device, size_t deviceSize, const char* action, size_t actionSize)
 {
-    return guarded([device = textOf(device, deviceSize), action = textOf(action, actionSize)](Extension& extension) {
-        return extension.act(device, action);
+    return guarded([deviceId = textOf(device, deviceSize), actionId = textOf(action, actionSize)](Extension& extension) {
+        return extension.act(deviceId, actionId);
     });
 }
 

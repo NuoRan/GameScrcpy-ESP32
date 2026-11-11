@@ -171,8 +171,8 @@ std::int32_t Extension::startJob(JobKind kind, std::uint64_t job, std::string_vi
     }
     auto running = std::make_unique<Running>();
     Running& slot = *running;
-    slot.thread = std::jthread([this, kind, job, copied = std::move(copied), &slot](const std::stop_token& stop) {
-        runJob(kind, job, copied, stop);
+    slot.thread = std::jthread([this, kind, job, arguments = std::move(copied), &slot](const std::stop_token& stop) {
+        runJob(kind, job, arguments, stop);
         slot.done.store(true, std::memory_order_release);
     });
     m_jobs.emplace(job, std::move(running));
