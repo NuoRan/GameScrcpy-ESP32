@@ -13,6 +13,7 @@
 #include "freertos/task.h"
 #include "soc/uart_pins.h"
 
+#include "gs_ble.h"
 #include "gs_board.h"
 #include "gs_wifi.h"
 
@@ -55,6 +56,9 @@ static void gs_write(gs_link_kind link, const uint8_t *data, size_t size)
 #endif
     case GS_LINK_UDP:
         gs_wifi_send(data, size);
+        break;
+    case GS_LINK_BLE:
+        gs_ble_link_send(data, size);
         break;
     default:
         break;

@@ -277,7 +277,7 @@ bool gs_wifi_configure(const char *ssid, const char *password, const uint8_t key
     return true;
 }
 
-bool gs_wifi_forget(void)
+bool gs_wifi_forget(bool keep_key)
 {
     static const uint8_t none[4] = {0, 0, 0, 0};
     nvs_handle_t handle;
@@ -285,7 +285,9 @@ bool gs_wifi_forget(void)
     if (nvs_open(GS_WIFI_NAMESPACE, NVS_READWRITE, &handle) == ESP_OK) {
         nvs_erase_key(handle, GS_WIFI_SSID);
         nvs_erase_key(handle, GS_WIFI_PASSWORD);
-        nvs_erase_key(handle, GS_WIFI_KEY);
+        if (!keep_key) {
+            nvs_erase_key(handle, GS_WIFI_KEY);
+        }
         erased = nvs_commit(handle) == ESP_OK;
         nvs_close(handle);
     }
@@ -300,6 +302,14 @@ bool gs_wifi_forget(void)
     gs_set_address(none);
     gs_state = GS_ESP32_WIFI_OFF;
     return erased;
+}
+
+void gs_wifi_set_key(const uint8_t key[GS_ESP32_KEY_SIZE])
+{
+    portENTER_CRITICAL(&gs_lock);
+    memcpy(gs_key, key, GS_ESP32_KEY_SIZE);
+    gs_has_peer = false;
+    portEXIT_CRITICAL(&gs_lock);
 }
 
 uint8_t gs_wifi_state(void)
@@ -364,9 +374,15 @@ bool gs_wifi_configure(const char *ssid, const char *password, const uint8_t key
     return false;
 }
 
-bool gs_wifi_forget(void)
+bool gs_wifi_forget(bool keep_key)
 {
+    (void)keep_key;
     return true;
+}
+
+void gs_wifi_set_key(const uint8_t key[GS_ESP32_KEY_SIZE])
+{
+    (void)key;
 }
 
 uint8_t gs_wifi_state(void)

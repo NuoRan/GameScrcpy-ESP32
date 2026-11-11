@@ -10,6 +10,7 @@ typedef enum {
     GS_LINK_UART = 0,
     GS_LINK_USB_JTAG = 1,
     GS_LINK_UDP = 2,
+    GS_LINK_BLE = 3,
 } gs_link_kind;
 
 bool gs_link_start(void);

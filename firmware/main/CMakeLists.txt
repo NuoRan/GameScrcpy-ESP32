@@ -2,9 +2,11 @@ idf_build_get_property(gs_target IDF_TARGET)
 
 set(gs_sources
     main.c
+    gs_ble.c
     gs_board.c
     gs_download.c
     gs_hid_reports.c
+    gs_key.c
     gs_link.c
     gs_wifi.c
 )
@@ -23,7 +25,11 @@ if(gs_target STREQUAL "esp32s2" OR gs_target STREQUAL "esp32s3" OR gs_target STR
     list(APPEND gs_sources gs_hid_usb.c)
 else()
     list(APPEND gs_sources gs_hid_ble.c)
-    list(APPEND gs_requires bt esp_hid)
+    list(APPEND gs_requires esp_hid)
+endif()
+
+if(NOT gs_target STREQUAL "esp32s2" AND NOT gs_target STREQUAL "esp32p4")
+    list(APPEND gs_requires bt)
 endif()
 
 if(NOT gs_target STREQUAL "esp32p4")

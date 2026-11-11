@@ -9,7 +9,8 @@
 bool gs_wifi_available(void);
 bool gs_wifi_start(const char *name, const uint8_t mac[6]);
 bool gs_wifi_configure(const char *ssid, const char *password, const uint8_t key[GS_ESP32_KEY_SIZE]);
-bool gs_wifi_forget(void);
+bool gs_wifi_forget(bool keep_key);
+void gs_wifi_set_key(const uint8_t key[GS_ESP32_KEY_SIZE]);
 uint8_t gs_wifi_state(void);
 void gs_wifi_ipv4(uint8_t out[4]);
 void gs_wifi_rename(const char *name);

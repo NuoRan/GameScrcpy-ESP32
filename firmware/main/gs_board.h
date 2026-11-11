@@ -13,3 +13,4 @@ const char *gs_board_name(void);
 const uint8_t *gs_board_mac(void);
 void gs_board_handle(gs_link_kind link, const gs_esp32_frame *frame);
 void gs_board_release(void);
+void gs_board_link_lost(gs_link_kind link);

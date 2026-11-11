@@ -14,8 +14,10 @@
 #include "freertos/task.h"
 #include "nvs.h"
 
+#include "gs_ble.h"
 #include "gs_download.h"
 #include "gs_hid.h"
+#include "gs_key.h"
 #include "gs_wifi.h"
 
 #define GS_STATUS_PERIOD_MS 50
@@ -34,6 +36,7 @@ static char gs_name[GS_ESP32_MAX_NAME + 1];
 static uint8_t gs_mac[6];
 static gs_esp32_status gs_pushed;
 static gs_esp32_parts gs_parts;
+static volatile bool gs_release_wanted;
 
 static void gs_copy_text(char *out, size_t capacity, const char *text)
 {
@@ -57,8 +60,11 @@ static void gs_send_error(gs_link_kind link, uint16_t code, const char *text)
 
 static void gs_send_pong(gs_link_kind link, uint32_t token)
 {
-    uint8_t payload[4];
-    const size_t size = gs_esp32_encode_token(payload, sizeof(payload), token);
+    uint8_t payload[5];
+    int8_t signal = 0;
+    const size_t size = link == GS_LINK_BLE && gs_ble_signal(&signal)
+                            ? gs_esp32_encode_pong(payload, sizeof(payload), token, signal)
+                            : gs_esp32_encode_token(payload, sizeof(payload), token);
     gs_link_send(link, GS_ESP32_MSG_PONG, payload, size);
 }
 
@@ -80,6 +86,12 @@ static void gs_send_hello(gs_link_kind link)
     }
     if (link == GS_LINK_USB_JTAG) {
         hello.features |= GS_ESP32_FEATURE_USB_SERIAL_LINK;
+    }
+    if (gs_ble_link_available()) {
+        hello.features |= GS_ESP32_FEATURE_BLE_LINK;
+    }
+    if (gs_key_present()) {
+        hello.features |= GS_ESP32_FEATURE_KEYED;
     }
     memcpy(hello.mac, gs_mac, sizeof(hello.mac));
     hello.wifi = gs_wifi_state();
@@ -263,13 +275,41 @@ static void gs_rename(gs_link_kind link, const char *name)
     gs_copy_text(gs_name, sizeof(gs_name), name);
     gs_hid_rename(gs_name);
     gs_wifi_rename(gs_name);
+    gs_ble_rename(gs_name);
+    gs_send_hello(link);
+}
+
+static bool gs_over_air(gs_link_kind link)
+{
+    return link == GS_LINK_UDP || link == GS_LINK_BLE;
+}
+
+static void gs_handle_key(gs_link_kind link, const gs_esp32_frame *frame)
+{
+    uint8_t key[GS_ESP32_KEY_SIZE];
+    if (gs_over_air(link)) {
+        gs_send_error(link, GS_ESP32_ERROR_UNSUPPORTED, "the key is set over the serial port");
+        return;
+    }
+    if (!gs_esp32_decode_key_set(frame->payload, frame->length, key)) {
+        gs_send_error(link, GS_ESP32_ERROR_MALFORMED, "malformed KEY_SET");
+        return;
+    }
+    if (!gs_key_store(key)) {
+        memset(key, 0, sizeof(key));
+        gs_send_error(link, GS_ESP32_ERROR_STORAGE, "could not store the key");
+        return;
+    }
+    gs_wifi_set_key(key);
+    gs_ble_set_key(key);
+    memset(key, 0, sizeof(key));
     gs_send_hello(link);
 }
 
 static void gs_handle_wifi(gs_link_kind link, const gs_esp32_frame *frame)
 {
     gs_esp32_wifi_set wifi;
-    if (link == GS_LINK_UDP) {
+    if (gs_over_air(link)) {
         gs_send_error(link, GS_ESP32_ERROR_UNSUPPORTED, "Wi-Fi is set over the serial port");
         return;
     }
@@ -285,7 +325,21 @@ static void gs_handle_wifi(gs_link_kind link, const gs_esp32_frame *frame)
         gs_send_error(link, GS_ESP32_ERROR_STORAGE, "could not store the Wi-Fi settings");
         return;
     }
+    gs_ble_set_key(wifi.key);
     memset(&wifi, 0, sizeof(wifi));
+    gs_send_hello(link);
+}
+
+static void gs_forget_wifi(gs_link_kind link)
+{
+    const bool keep_key = gs_ble_link_available();
+    if (!gs_wifi_forget(keep_key)) {
+        gs_send_error(link, GS_ESP32_ERROR_STORAGE, "could not forget the Wi-Fi settings");
+        return;
+    }
+    if (!keep_key) {
+        gs_ble_forget_key();
+    }
     gs_send_hello(link);
 }
 
@@ -369,11 +423,10 @@ void gs_board_handle(gs_link_kind link, const gs_esp32_frame *frame)
         gs_handle_wifi(link, frame);
         return;
     case GS_ESP32_MSG_WIFI_FORGET:
-        if (gs_wifi_forget()) {
-            gs_send_hello(link);
-        } else {
-            gs_send_error(link, GS_ESP32_ERROR_STORAGE, "could not forget the Wi-Fi settings");
-        }
+        gs_forget_wifi(link);
+        return;
+    case GS_ESP32_MSG_KEY_SET:
+        gs_handle_key(link, frame);
         return;
     case GS_ESP32_MSG_SET_NAME: {
         char name[GS_ESP32_MAX_NAME + 1];
@@ -410,6 +463,13 @@ static void gs_status_task(void *argument)
     gs_esp32_status status;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(GS_STATUS_PERIOD_MS));
+        if (gs_release_wanted) {
+            gs_release_wanted = false;
+            if (gs_holding()) {
+                gs_board_release();
+                ESP_LOGW(gs_tag, "the computer's Bluetooth link ended: released every touch, key and button");
+            }
+        }
         if (gs_holding() && esp_timer_get_time() - gs_last_frame > (int64_t)GS_ESP32_SAFETY_MS * 1000) {
             gs_board_release();
             ESP_LOGW(gs_tag, "nothing from the computer for 2 s: released every touch, key and button");
@@ -465,8 +525,9 @@ void gs_board_start_parts(void)
     if (gs_parts.wifi_problem == GS_ESP32_PART_PENDING) {
         gs_parts.wifi_problem = gs_wifi_start(gs_name, gs_mac) ? GS_ESP32_PART_OK : GS_ESP32_PART_FAILED;
     }
-    ESP_LOGI(gs_tag, "USB %s, Bluetooth %s, Wi-Fi %s", gs_part_text(gs_parts.usb_problem),
-             gs_part_text(gs_parts.ble_problem), gs_part_text(gs_parts.wifi_problem));
+    const bool computer = gs_ble_link_start(gs_name, gs_mac);
+    ESP_LOGI(gs_tag, "USB %s, Bluetooth %s, Wi-Fi %s, Bluetooth to the computer %s", gs_part_text(gs_parts.usb_problem),
+             gs_part_text(gs_parts.ble_problem), gs_part_text(gs_parts.wifi_problem), computer ? "ready" : "not on");
     gs_send_hello(GS_LINK_UART);
     if (gs_link_active() != GS_LINK_UART) {
         gs_send_hello(gs_link_active());
@@ -476,6 +537,13 @@ void gs_board_start_parts(void)
 const char *gs_board_name(void)
 {
     return gs_name;
+}
+
+void gs_board_link_lost(gs_link_kind link)
+{
+    if (gs_link_active() == link) {
+        gs_release_wanted = true;
+    }
 }
 
 const uint8_t *gs_board_mac(void)
