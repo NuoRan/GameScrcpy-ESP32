@@ -326,22 +326,7 @@ Fleet::Fleet(FleetHooks hooks, Changed changed)
 
 Fleet::~Fleet()
 {
-    {
-        const std::scoped_lock lock(m_gate->mutex);
-        m_gate->owner = nullptr;
-    }
-    m_watcher.reset();
-    cancelScan();
-    if (m_thread.joinable()) {
-        m_thread.request_stop();
-        m_wake.notify_all();
-        m_thread.join();
-    }
-    if (m_lifter.joinable()) {
-        m_lifter.request_stop();
-        m_liftWake.notify_all();
-        m_lifter.join();
-    }
+    stop();
     Dropped dropped;
     {
         const std::scoped_lock lock(m_mutex);
@@ -382,6 +367,26 @@ void Fleet::start()
     }
     const std::scoped_lock lock(m_mutex);
     requestScanLocked();
+}
+
+void Fleet::stop()
+{
+    {
+        const std::scoped_lock lock(m_gate->mutex);
+        m_gate->owner = nullptr;
+    }
+    m_watcher.reset();
+    cancelScan();
+    if (m_thread.joinable()) {
+        m_thread.request_stop();
+        m_wake.notify_all();
+        m_thread.join();
+    }
+    if (m_lifter.joinable()) {
+        m_lifter.request_stop();
+        m_liftWake.notify_all();
+        m_lifter.join();
+    }
 }
 
 void Fleet::setActive(bool active)

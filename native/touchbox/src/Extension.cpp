@@ -176,6 +176,7 @@ Extension::~Extension()
         jobs.swap(m_jobs);
     }
     jobs.clear();
+    m_fleet->stop();
     m_fleet.reset();
     log::setSink(nullptr);
 }

@@ -128,6 +128,7 @@ public:
     Fleet& operator=(const Fleet&) = delete;
 
     void start();
+    void stop();
     void setActive(bool active);
     void setSettings(esp32::Esp32Settings settings);
     void rescan();

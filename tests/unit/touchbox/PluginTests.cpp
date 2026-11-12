@@ -9,11 +9,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -631,4 +634,46 @@ TEST_CASE("ADR-0112: pairing a board seen over Bluetooth whose key this computer
     CHECK(radio->isPaired(kNearby));
     CHECK(gs::esp32::parseBoards(fake.stored("boards")).at(0).bluetooth == "DE:AD:BE:EF:01:04");
     plugin->unload(plugin->context);
+}
+
+TEST_CASE("ADR-0112: unloading the plugin while it asks a serial port stops the search and lets go of the port")
+{
+    struct Asking {
+        std::mutex mutex;
+        std::condition_variable_any changed;
+        bool started = false;
+    };
+    const auto asking = std::make_shared<Asking>();
+    FleetHooks hooks;
+    hooks.watchUsb = false;
+    hooks.list = [] {
+        return std::vector<gs::esp32::SerialPortInfo>{gs::esp32::SerialPortInfo{.name = "COM250",
+                                                                               .description = "USB-SERIAL CH340",
+                                                                               .vendorId = gs::esp32::kWchVendor,
+                                                                               .productId = 0x7523,
+                                                                               .kind = gs::esp32::PortKind::Ch34x}};
+    };
+    hooks.probe = [asking](const gs::touchbox::Candidate&, const gs::esp32::Esp32Settings&, gs::esp32::LinkEvents,
+                           const std::stop_token& stop, gs::esp32::BoardTrouble&) -> gs::touchbox::Probed {
+        std::unique_lock lock(asking->mutex);
+        asking->started = true;
+        asking->changed.notify_all();
+        static_cast<void>(asking->changed.wait(lock, stop, [] { return false; }));
+        return gs::makeUnexpected(gs::esp32::OpenFailure::Stopped);
+    };
+    FakeHost fake;
+    const gs_ext_host host = fake.table();
+    const gs_ext_plugin* plugin = nullptr;
+    REQUIRE(gs::touchbox::startPlugin(&host, &plugin,
+                                      PluginOptions{.hooks = hooks,
+                                                    .folder = GS_PACKAGE_DIR,
+                                                    .radio = std::make_shared<esp32test::FakeRadio>()}) == GS_EXT_OK);
+    {
+        std::unique_lock lock(asking->mutex);
+        REQUIRE(asking->changed.wait_for(lock, 10s, [&asking] { return asking->started; }));
+    }
+    plugin->unload(plugin->context);
+    const std::scoped_lock lock(fake.mutex);
+    CHECK(fake.claims == std::vector<std::string>{"serial:COM250"});
+    CHECK(fake.releases == std::vector<std::string>{"serial:COM250"});
 }
