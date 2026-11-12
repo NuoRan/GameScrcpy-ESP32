@@ -260,6 +260,12 @@ public:
         m_pairing = outcome;
     }
 
+    void pairElsewhere(std::uint64_t address)
+    {
+        const std::lock_guard lock(m_mutex);
+        m_paired.insert(address);
+    }
+
     [[nodiscard]] gs::esp32::BluetoothState state() override
     {
         const std::lock_guard lock(m_mutex);

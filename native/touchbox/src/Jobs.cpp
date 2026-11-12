@@ -790,13 +790,22 @@ void Extension::runUnpair(std::uint64_t job, const std::string& device)
 {
     std::optional<std::uint64_t> address;
     const std::vector<esp32::KnownBoard> known = knownBoards();
+    const auto touchBoxAt = [this, &known](std::uint64_t at) {
+        const std::string text = esp32::bluetoothText(at);
+        return esp32::findBluetooth(known, text).has_value() ||
+               std::ranges::any_of(m_radio->seen(esp32::kSeenRecently),
+                                   [at](const esp32::SeenBoard& each) { return each.address == at; }) ||
+               std::ranges::any_of(m_fleet->boards(), [&text](const Board& each) {
+                   return each.via == esp32::LinkMode::Bluetooth && esp32::sameBluetooth(each.where, text);
+               });
+    };
     if (const std::optional<esp32::KnownBoard> book = esp32::findBoard(known, device)) {
         address = esp32::parseBluetooth(book->bluetooth);
     } else if (const std::optional<Board> board = m_fleet->board(device);
                board && board->via == esp32::LinkMode::Bluetooth) {
         address = esp32::parseBluetooth(board->where);
-    } else {
-        address = esp32::parseBluetooth(device);
+    } else if (const std::optional<std::uint64_t> typed = esp32::parseBluetooth(device); typed && touchBoxAt(*typed)) {
+        address = typed;
     }
     if (!address) {
         m_host.fail(job, notPairableText(m_language, device));

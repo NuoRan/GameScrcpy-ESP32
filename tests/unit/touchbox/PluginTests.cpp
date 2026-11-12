@@ -350,6 +350,7 @@ void start(const gs_ext_plugin& plugin, std::string_view name, uint64_t job, con
 }
 
 constexpr std::uint64_t kNearby = 0xDEADBEEF0104ULL;
+constexpr std::uint64_t kElsewhere = 0x112233445566ULL;
 
 }
 
@@ -633,6 +634,33 @@ TEST_CASE("ADR-0112: pairing a board seen over Bluetooth whose key this computer
     CHECK(Json::parse(*fake.result(32)).at("address") == "DE:AD:BE:EF:01:04");
     CHECK(radio->isPaired(kNearby));
     CHECK(gs::esp32::parseBoards(fake.stored("boards")).at(0).bluetooth == "DE:AD:BE:EF:01:04");
+    plugin->unload(plugin->context);
+}
+
+TEST_CASE("ADR-0112: unpairing refuses a Bluetooth address that is not an ESP32 touch box and leaves its pairing "
+          "with Windows alone")
+{
+    FakeHost fake;
+    auto radio = std::make_shared<esp32test::FakeRadio>();
+    radio->add(kNearby, fakeBoard(keyOf(5)));
+    radio->pairElsewhere(kNearby);
+    radio->pairElsewhere(kElsewhere);
+    const gs_ext_host host = fake.table();
+    const gs_ext_plugin* plugin = nullptr;
+    REQUIRE(gs::touchbox::startPlugin(&host, &plugin, quietOptions(radio)) == GS_EXT_OK);
+
+    start(*plugin, "unpair", 40, R"({"device": "11:22:33:44:55:66"})");
+    REQUIRE(ended(fake, 40));
+    REQUIRE(fake.failure(40).has_value());
+    CHECK(fake.failure(40)->find("11:22:33:44:55:66") != std::string::npos);
+    CHECK(radio->isPaired(kElsewhere));
+
+    start(*plugin, "unpair", 41, R"({"device": "DE:AD:BE:EF:01:04"})");
+    REQUIRE(ended(fake, 41));
+    INFO(fake.failure(41).value_or(std::string()));
+    REQUIRE(fake.result(41).has_value());
+    CHECK(Json::parse(*fake.result(41)).at("unpaired") == true);
+    CHECK_FALSE(radio->isPaired(kNearby));
     plugin->unload(plugin->context);
 }
 
