@@ -42,6 +42,33 @@ extern "C" {
 /* A flag of claim: ask whoever has the hardware to let it go, and wait up to 3 seconds for it. */
 #define GS_EXT_CLAIM_WAIT 1u
 
+/* A contribution whose data is a gs_ext_input_source. */
+#define GS_EXT_KIND_INPUT_SOURCE "input-source"
+
+/* A contribution whose data is a gs_ext_transport. */
+#define GS_EXT_KIND_TRANSPORT "transport"
+
+/* A contribution whose data is a gs_ext_video_source. */
+#define GS_EXT_KIND_VIDEO_SOURCE "video-source"
+
+/* A contribution whose data is a gs_ext_audio_source. */
+#define GS_EXT_KIND_AUDIO_SOURCE "audio-source"
+
+/* A contribution whose data is a gs_ext_media_sink. */
+#define GS_EXT_KIND_MEDIA_SINK "media-sink"
+
+/* A contribution whose data is a gs_ext_recording_exporter. */
+#define GS_EXT_KIND_RECORDING_EXPORTER "recording-exporter"
+
+/* The rate of all sound that goes between a DLL and GameScrcpy, in frames a second. */
+#define GS_EXT_SOUND_RATE 48000
+
+/* A contribution whose data is a gs_ext_frame_tap. */
+#define GS_EXT_KIND_FRAME_TAP "frame-tap"
+
+/* A contribution whose data is a gs_ext_vision_engine. */
+#define GS_EXT_KIND_VISION_ENGINE "vision-engine"
+
 /* What a node parameter or result holds. The names in the manifest's contributes.native are the same types. */
 enum gs_ext_type {
     /* No value: the result of a node that gives nothing back. */
@@ -182,6 +209,76 @@ enum gs_ext_slot_kind {
     GS_EXT_SLOT_AXIS1 = 2,
 };
 
+/* How the pixels of a gs_ext_video_frame are laid out. A Direct3D 11 shared texture comes in a later version as another format, with fields added at the end of gs_ext_video_frame; GameScrcpy refuses a format it does not know with GS_EXT_UNSUPPORTED. */
+enum gs_ext_pixel_format {
+    /* Four bytes a pixel in the order blue, green, red and alpha, the rows from the top; alpha is not used. */
+    GS_EXT_PIXEL_BGRA = 1,
+    /* A luma plane with one byte a pixel, then a chroma plane with a blue and a red byte for each 2 x 2 pixels; BT.709 colors in limited range. */
+    GS_EXT_PIXEL_NV12 = 2,
+};
+
+/* How the samples of a gs_ext_audio are written. */
+enum gs_ext_sample_format {
+    /* Signed 16-bit samples, the channels of one frame next to each other. */
+    GS_EXT_SAMPLE_S16 = 1,
+    /* 32-bit float samples from -1 to 1, the channels of one frame next to each other. */
+    GS_EXT_SAMPLE_F32 = 2,
+};
+
+/* How the pixels of a gs_ext_frame are laid out. */
+enum gs_ext_frame_format {
+    /* pixels holds 4 bytes for each pixel, blue, green, red and 255, in rows from the top that start stride bytes apart. */
+    GS_EXT_FRAME_BGRA = 0,
+};
+
+/* What a gs_ext_shape draws. */
+enum gs_ext_shape_kind {
+    /* The outline of a rectangle with corners at x, y and x2, y2. */
+    GS_EXT_SHAPE_RECT = 0,
+    /* A line from x, y to x2, y2. */
+    GS_EXT_SHAPE_LINE = 1,
+    /* A ring around the point x, y; x2 and y2 are not used. */
+    GS_EXT_SHAPE_POINT = 2,
+    /* The text on a small plate whose top left corner is at x, y; x2 and y2 are not used. */
+    GS_EXT_SHAPE_TEXT = 3,
+};
+
+/* The color of a gs_ext_shape: the colors that logic draws with. */
+enum gs_ext_shape_color {
+    /* The accent color of the theme. */
+    GS_EXT_COLOR_ACCENT = 0,
+    /* The color the theme uses for success. */
+    GS_EXT_COLOR_GOOD = 1,
+    /* The color the theme uses for warnings. */
+    GS_EXT_COLOR_WARN = 2,
+    /* The color the theme uses for problems. */
+    GS_EXT_COLOR_BAD = 3,
+    /* White. */
+    GS_EXT_COLOR_WHITE = 4,
+};
+
+/* What a vision engine is asked to recognize; bit 1u << kind of gs_ext_vision_engine.kinds says that it can. */
+enum gs_ext_vision_kind {
+    /* "ocr" in the manifest: reads text. The result lists { text, x, y, width, height, confidence } for each piece of text. */
+    GS_EXT_VISION_OCR = 0,
+    /* "detect" in the manifest: finds things. The result lists { label, x, y, width, height, confidence } for each one. */
+    GS_EXT_VISION_DETECT = 1,
+    /* "classify" in the manifest: tells what the picture shows. The result lists { label, confidence } for each class. */
+    GS_EXT_VISION_CLASSIFY = 2,
+};
+
+/* What a gs_ext_device_event tells. */
+enum gs_ext_device_event_type {
+    /* Bytes came from a serial device, in data. */
+    GS_EXT_DEVICE_DATA = 0,
+    /* An input report came from a HID device: report is its id and data its bytes. */
+    GS_EXT_DEVICE_REPORT = 1,
+    /* A characteristic of a Bluetooth LE device that the DLL subscribed to changed: service and characteristic name it, and data is its new value. */
+    GS_EXT_DEVICE_NOTIFY = 2,
+    /* The device closed without the DLL closing it: reason says why and text says it in words. Its number is not used again. */
+    GS_EXT_DEVICE_CLOSED = 3,
+};
+
 typedef struct gs_ext_value gs_ext_value;
 typedef struct gs_ext_result gs_ext_result;
 typedef struct gs_ext_contact gs_ext_contact;
@@ -199,9 +296,27 @@ typedef struct gs_ext_attachment gs_ext_attachment;
 typedef struct gs_ext_behavior gs_ext_behavior;
 typedef struct gs_ext_job gs_ext_job;
 typedef struct gs_ext_device_provider gs_ext_device_provider;
+typedef struct gs_ext_stream_open gs_ext_stream_open;
+typedef struct gs_ext_transport gs_ext_transport;
+typedef struct gs_ext_tap_open gs_ext_tap_open;
+typedef struct gs_ext_frame gs_ext_frame;
+typedef struct gs_ext_shape gs_ext_shape;
+typedef struct gs_ext_overlay gs_ext_overlay;
+typedef struct gs_ext_frame_tap gs_ext_frame_tap;
 typedef struct gs_ext_host gs_ext_host;
 typedef struct gs_ext_contribution gs_ext_contribution;
 typedef struct gs_ext_plugin gs_ext_plugin;
+typedef struct gs_ext_input_source gs_ext_input_source;
+typedef struct gs_ext_video_frame gs_ext_video_frame;
+typedef struct gs_ext_audio gs_ext_audio;
+typedef struct gs_ext_video_source gs_ext_video_source;
+typedef struct gs_ext_audio_source gs_ext_audio_source;
+typedef struct gs_ext_sink_info gs_ext_sink_info;
+typedef struct gs_ext_media_sink gs_ext_media_sink;
+typedef struct gs_ext_recording_exporter gs_ext_recording_exporter;
+typedef struct gs_ext_image gs_ext_image;
+typedef struct gs_ext_vision_engine gs_ext_vision_engine;
+typedef struct gs_ext_device_event gs_ext_device_event;
 
 /* A node parameter or result. It never changes in later versions. */
 struct gs_ext_value {
@@ -495,6 +610,122 @@ struct gs_ext_device_provider {
     int32_t (*act)(void* context, const char* device, size_t device_size, const char* action, size_t action_size);
 };
 
+/* The stream that a transport opens: to which phone, for which channel of which session. */
+struct gs_ext_stream_open {
+    /* sizeof(gs_ext_stream_open) in GameScrcpy. */
+    uint32_t size;
+    /* The id that discover gave for the phone, UTF-8 ended by a zero byte. */
+    const char* phone;
+    /* The channel of the session that the stream carries, ended by a zero byte: "control" first, then "video", "audio" and "bulk" as the session needs them. */
+    const char* channel;
+    /* The session as a UTF-8 JSON object, not ended by a zero byte, the same for all of its streams and for every attempt to resume it: session (its id), token (32 hex digits; the client proves to the server that it knows it), protocol (the protocol version), socket (the abstract socket that the server of the session listens on), lingerMs and log, and server, how GameScrcpy starts that server over adb, which a transport that starts it itself does the same way: { file (the server package on this computer), path (where it goes on the phone), command (the shell command that starts it), stdin (the line to write to its standard input) }, or null when GameScrcpy has no server package. */
+    const char* session;
+    /* How many bytes session has. */
+    size_t session_size;
+};
+
+/* A transport: another way to reach phones, such as a relay server, a company tunnel, a cloud phone or another way of finding phones on the network. Its phones are listed on the devices page with its title as the way they are connected, and their sessions run over byte streams that it carries, one for each channel of a session. It needs the permission transport, and network when it uses the network. open, send and close may come from different GameScrcpy threads, one call into the transport at a time; the DLL reports from its own threads. */
+struct gs_ext_transport {
+    /* sizeof(gs_ext_transport) in the DLL. */
+    uint32_t size;
+    /* The name of the transport in the manifest's contributes.native.transports. */
+    const char* name;
+    /* Passed back to discover, open, send and close. */
+    void* context;
+    /* Puts the phones it can reach now into out as a JSON array with set_text, each { id, name, model, detail }: id is 1 to 64 characters that stay the same for the same phone, name is what the devices page calls it, and model and detail are short texts for its card that may be left out. GameScrcpy calls it when the extension turns on and after transport_changed; answer within 100 ms. */
+    int32_t (*discover)(void* context, gs_ext_result* out);
+    /* Starts opening a byte stream, numbered stream, to the server on a phone for one channel of a session. The stream has to reach the same server endpoint that the adb tunnel reaches: the abstract socket that the server started for the session listens on. GameScrcpy runs the session's own handshake and protocol over it, so encryption, the proof of the token and the video coding do not change; starting that server on the phone is the transport's business. Return at once, then call stream_opened when bytes can flow, or stream_closed with a reason when they cannot, within 20 seconds. Anything but GS_EXT_OK means it did not start, and nothing more may be said about it. */
+    int32_t (*open)(void* context, uint64_t stream, const gs_ext_stream_open* open);
+    /* Sends at most 64 KiB toward the phone on an opened stream; return quickly. GS_EXT_OK takes all of the bytes and GS_EXT_BUSY none of them, which GameScrcpy sends again after stream_writable; anything else ends the stream. */
+    int32_t (*send)(void* context, uint64_t stream, const uint8_t* data, size_t size);
+    /* GameScrcpy is done with the stream: close it and forget it. It never comes after stream_closed, but it may cross with it, so ignore a stream that the DLL no longer knows. */
+    void (*close)(void* context, uint64_t stream);
+};
+
+/* The phone a frame tap starts reading. */
+struct gs_ext_tap_open {
+    /* sizeof(gs_ext_tap_open) in GameScrcpy. */
+    uint32_t size;
+    /* The phone's serial number, UTF-8 ended by a zero byte. */
+    const char* device;
+    /* The width in pixels of the frames the tap gets. */
+    uint32_t width;
+    /* The height in pixels of the frames the tap gets. */
+    uint32_t height;
+    /* How far the picture is turned from the phone's natural orientation, in quarter turns from 0 to 3. When the picture turns or changes size, GameScrcpy closes the tap and opens it again. */
+    uint32_t rotation;
+};
+
+/* One frame of the mirrored picture. */
+struct gs_ext_frame {
+    /* sizeof(gs_ext_frame) in GameScrcpy. */
+    uint32_t size;
+    /* How the picture is given, one of gs_ext_frame_format; a later version may add formats, such as a texture on the graphics card, for a tap that asks for them. */
+    uint32_t format;
+    /* The picture, read-only and valid until frame returns; copy what you need to keep. */
+    const void* pixels;
+    /* How many bytes apart the rows start, at least 4 * width. */
+    uint32_t stride;
+    /* The width in pixels of the picture as shown, made smaller so that its long side is at most the size in the manifest. */
+    uint32_t width;
+    /* The height in pixels. */
+    uint32_t height;
+    /* When the phone, or the capture card, made the frame, in microseconds of its own clock: only the time between two frames means something. */
+    uint64_t time_us;
+};
+
+/* One shape that a frame tap draws over the picture. It never changes in later versions. */
+struct gs_ext_shape {
+    /* What it draws, one of gs_ext_shape_kind. */
+    uint32_t kind;
+    /* Its color, one of gs_ext_shape_color; another number draws it in the accent color. */
+    uint32_t color;
+    /* A number of the DLL's choosing, such as the object it marks: a shape with the id of one shown before takes its place, and of two shapes with the same id in one overlay only the last is drawn. */
+    uint32_t id;
+    /* The position, as a ratio of the frame width: 0 left, 1 right. */
+    double x;
+    /* The position, as a ratio of the frame height: 0 top, 1 bottom. */
+    double y;
+    /* The other corner of a rectangle or the other end of a line, as a ratio of the width. */
+    double x2;
+    /* The other corner of a rectangle or the other end of a line, as a ratio of the height. */
+    double y2;
+    /* UTF-8 text, not ended by a zero byte: what a GS_EXT_SHAPE_TEXT shape shows, or a label next to a rectangle or a point; lines show none. GameScrcpy copies up to 64 bytes before frame returns. May be NULL. */
+    const char* text;
+    /* How many bytes text has. */
+    size_t text_size;
+};
+
+/* Where a frame tap puts the shapes to draw over the picture. */
+struct gs_ext_overlay {
+    /* sizeof(gs_ext_overlay) in GameScrcpy. */
+    uint32_t size;
+    /* Room for capacity shapes. */
+    gs_ext_shape* shapes;
+    /* How many shapes fit: 256. */
+    uint32_t capacity;
+    /* How many shapes there are. It starts at 0: the shapes of each frame take the place of all shapes shown before, so give them again with every frame, and leave 0 to show nothing. */
+    uint32_t count;
+    /* It starts at 0; set it to 1 to leave the shapes shown before as they are, for example for a frame the DLL skipped. */
+    uint32_t keep;
+};
+
+/* A frame tap: reads the mirrored picture of each phone where the user turns it on in the More menu of the mirror window, and draws shapes over it. It needs the permission media.read. The calls for one state come one at a time. */
+struct gs_ext_frame_tap {
+    /* sizeof(gs_ext_frame_tap) in the DLL. */
+    uint32_t size;
+    /* The name of the frame tap in the manifest's contributes.native.frameTaps. */
+    const char* name;
+    /* Passed back to open. */
+    void* context;
+    /* Starts reading the picture of one phone; keep what you need in *state. Anything but GS_EXT_OK leaves the tap off on that phone until the user turns it on again or the phone connects again. */
+    int32_t (*open)(void* context, const gs_ext_tap_open* info, void** state);
+    /* One frame of the picture, at most as many a second as the manifest's fps. It is called on a thread of GameScrcpy's own for the tap and may take its time: one newer frame waits meanwhile, and a frame that comes after it takes its place. Put the shapes to draw over the picture into overlay; anything but GS_EXT_OK leaves the shapes shown before as they are. */
+    int32_t (*frame)(void* state, const gs_ext_frame* frame, gs_ext_overlay* overlay);
+    /* Stops reading, after the last frame: the user turned the tap off, the phone went away or the extension stops. Free the state; GameScrcpy takes the shapes away. */
+    void (*close)(void* state);
+};
+
 /* What GameScrcpy gives a DLL. */
 struct gs_ext_host {
     /* sizeof(gs_ext_host) in GameScrcpy; later versions only add functions at the end. */
@@ -519,7 +750,7 @@ struct gs_ext_host {
     int32_t (*set_text)(gs_ext_result* result, uint32_t type, const char* text, size_t size);
     /* Says why a node failed; the script that called it gets the text in its error. */
     int32_t (*set_error)(gs_ext_result* result, const char* text, size_t size);
-    /* 1 when this GameScrcpy has the feature, such as "jobs", "events", "settings" or "claims", otherwise 0; ask before using a function that a later version added. */
+    /* 1 when this GameScrcpy has the feature, such as "jobs", "events", "settings", "claims", "job-output", "app-events", "transports", "media" or "frame-taps", otherwise 0; ask before using a function that a later version added. */
     int32_t (*supports)(void* context, const char* feature);
     /* Tells how far a job got: fraction from 0 to 1, or -1 when it cannot tell, and a short UTF-8 line about the step it is on. GameScrcpy passes on at most 20 a second and drops the others in between. */
     int32_t (*job_progress)(void* context, uint64_t job, double fraction, const char* text, size_t size);
@@ -529,7 +760,7 @@ struct gs_ext_host {
     int32_t (*job_finish)(void* context, uint64_t job, const char* json, size_t size);
     /* Ends a job that did not work, or that was cancelled, saying why in UTF-8. */
     int32_t (*job_fail)(void* context, uint64_t job, const char* text, size_t size);
-    /* Sends an event to this extension's scripts and panels, which hear it with events.on(topic, handler). topic is 1 to 64 lowercase letters, digits, dots and dashes; json is UTF-8 JSON of at most 64 KiB (empty for null). Each topic passes on the first 100 events in a second; the ones after that in the same second are merged, so only the last of them arrives, when the second is over. GS_EXT_BAD_ARGUMENT for a bad topic or JSON. */
+    /* Sends an event to this extension's scripts and panels, which hear it with events.on(topic, handler). topic is 1 to 64 lowercase letters, digits, dots and dashes; json is UTF-8 JSON of at most 64 KiB (empty for null). Each topic passes on the first 100 events in a second; the ones after that in the same second are merged, so only the last of them arrives, when the second is over. GS_EXT_BAD_ARGUMENT for a bad topic or JSON, and for a topic that begins as GameScrcpy's own do (device., session., profile., app., orientation., recording., window., extension. or settings.), so that no extension speaks for GameScrcpy. */
     int32_t (*emit_event)(void* context, const char* topic, size_t topic_size, const char* json, size_t json_size);
     /* Puts the value of one of the extension's settings into value as json; its text stays valid until the same thread calls setting_get again. With an empty phone it is the value for all phones; with the phone of a touch method's options it is that phone's own value of a per-phone setting, or the value for all phones when it has none. GS_EXT_BAD_ARGUMENT for a key the manifest does not declare. */
     int32_t (*setting_get)(void* context, const char* key, size_t key_size, const char* phone, size_t phone_size, gs_ext_result* value);
@@ -539,6 +770,42 @@ struct gs_ext_host {
     int32_t (*claim)(void* context, const char* resource, size_t size, uint32_t flags);
     /* Lets go of hardware the extension claimed. GameScrcpy lets go of all of it when the extension stops. */
     int32_t (*release)(void* context, const char* resource, size_t size);
+    /* Hands over a part of a job's result while it runs, as UTF-8 JSON of at most 64 KiB (empty for null), such as each device a scan finds or each command a speech engine hears; the logic that started the job gets it through job.onOutput. Up to 100 a second: GS_EXT_BUSY for the ones after that in the same second, GS_EXT_BAD_ARGUMENT for text that is not JSON. Ask supports("job-output") first. */
+    int32_t (*job_output)(void* context, uint64_t job, const char* json, size_t size);
+    /* Asks for one of GameScrcpy's own events with on 1, or stops it with on 0; the DLL hears it in on_event. The topics are device.connected, device.disconnected, session.started, session.ended, profile.applied, app.foreground, orientation.changed, recording.started, recording.ended and window.focused, which tell what the phones and their windows do and need the permission events.app, and extension.enabled, extension.disabled and settings.changed, which every extension hears; settings.changed tells only of the extension's own settings and of GameScrcpy's language and look. events.on in the script documentation gives the JSON of each. For each topic the first 100 events in a second come at once and the rest of that second are merged into its last one. GS_EXT_BAD_ARGUMENT for a topic that is not written as one, GS_EXT_UNSUPPORTED for one this GameScrcpy does not send, GS_EXT_DENIED without the permission. */
+    int32_t (*events_subscribe)(void* context, const char* topic, size_t size, uint32_t on);
+    /* Feeds a change of one of the DLL's input sources into the key mapping, where profiles bind the slot as Ext.<extension id>.<source>.<slot> and recording a key takes a press of it. source and slot name a source and one of its slots in the manifest's contributes.native.inputSources, UTF-8 not ended by a zero byte. A button gives 1 in x when it goes down and 0 when it comes up; an axis gives x from -1 to 1; a stick gives x from -1 left to 1 right and y from -1 up to 1 down; y is ignored for buttons and axes. time_us is when it happened, in microseconds of now_us, or 0 for now. It needs the permission input.provide (GS_EXT_DENIED without it) and returns GS_EXT_BAD_ARGUMENT for a source or slot the manifest does not declare or a value out of range. A value the slot has already gives GS_EXT_OK and is not passed on. Each source passes on at most 1000 events a second; the rest are dropped with GS_EXT_FAILED and one line in the log, except a slot going back to 0, which always passes. Call it from any thread; it returns at once. When the extension stops, its buttons come up and its axes go back to 0. supports("input-sources") is 1 when GameScrcpy has it. */
+    int32_t (*input_event)(void* context, const char* source, size_t source_size, const char* slot, size_t slot_size, double x, double y, uint64_t time_us);
+    /* Calls a service that another extension offers in its manifest's contributes.services, named "<extension id>/<service>", with its arguments as UTF-8 JSON of at most 252 KiB (empty for null), and waits for the answer, at most 10 seconds. GS_EXT_OK puts the result into result as json; anything else puts the reason there as a string: GS_EXT_UNSUPPORTED (GS-API-146) when no extension that is on offers the service, and also when it is called on a thread of GameScrcpy's own; GS_EXT_DENIED (GS-API-147) when this extension does not list the other one in its dependencies; GS_EXT_BAD_ARGUMENT (GS-API-148) when the arguments or the result do not match the service's schemas; GS_EXT_FAILED (GS-API-149) when the service failed or took too long. The text stays valid until the same thread calls call_service again. Call it only from a thread of the DLL's own: never from a node, an action, a touch method, an attachment, a behavior, a job's start or a callback such as settings_changed. Ask supports("services") first. A service that the DLL answers itself is a node with one json parameter that returns json; it gets { caller, permissions, input }: the id of the extension that calls ("" for the user's own logic), the permissions that both extensions have, and the arguments. allowed() answers for this extension only, so decide yourself what to do for the caller. */
+    int32_t (*call_service)(void* context, const char* service, size_t service_size, const char* json, size_t json_size, gs_ext_result* result);
+    /* Tells GameScrcpy that the phones one of the DLL's transports can reach changed, so that it calls discover again; a session that lost its connection through the transport tries again at once. */
+    int32_t (*transport_changed)(void* context, const char* transport, size_t size);
+    /* Says that a stream that open started now reaches the server on the phone. */
+    int32_t (*stream_opened)(void* context, uint64_t stream);
+    /* Gives bytes that came from the phone on an opened stream, in order; GameScrcpy copies them before it returns. Call it from a thread of the DLL's own or from within open, send and close, never from a node, a touch method, an attachment, a behavior or a device provider: in its own process a DLL may wait here while GameScrcpy catches up. */
+    int32_t (*stream_data)(void* context, uint64_t stream, const uint8_t* data, size_t size);
+    /* After send returned GS_EXT_BUSY: the stream can take bytes again, so GameScrcpy sends what it holds. */
+    int32_t (*stream_writable)(void* context, uint64_t stream);
+    /* Ends a stream that can carry no more, also when the server on the phone closed its end, or says why open could not reach the phone, with a reason in UTF-8 of at most 1000 bytes. The session sees a lost connection, as when the adb tunnel drops, shows the reason and tries to resume; GameScrcpy does not call close for the stream afterwards. */
+    int32_t (*stream_closed)(void* context, uint64_t stream, const char* reason, size_t size);
+    /* Tells GameScrcpy that the pictures or the sounds of one of the DLL's video or audio sources changed, so that it calls list again. It needs the permission media.capture. */
+    int32_t (*sources_changed)(void* context, const char* source, size_t size);
+    /* Hands one picture of an open video source to GameScrcpy from any thread; it is copied into a ring of a few frames, from which GameScrcpy shows the newest. GS_EXT_UNSUPPORTED for a format GameScrcpy does not know, GS_EXT_BAD_ARGUMENT for a stream that is not open or a frame against the rules of gs_ext_video_frame, GS_EXT_FAILED once the stream has ended. */
+    int32_t (*video_frame)(void* context, uint64_t stream, const gs_ext_video_frame* frame);
+    /* Hands some sound of an open audio source to GameScrcpy from any thread; it is copied into a ring of about a second, and sound that does not fit is dropped. GS_EXT_BAD_ARGUMENT for a stream that is not open or sound against the rules of gs_ext_audio. */
+    int32_t (*audio_samples)(void* context, uint64_t stream, const gs_ext_audio* audio);
+    /* Says that an open source has nothing more to give, such as when its device was unplugged, and why in UTF-8; GameScrcpy shows the picture as disconnected until the source is listed and opened again. */
+    int32_t (*stream_ended)(void* context, uint64_t stream, const char* text, size_t size);
+    /* Puts the devices the user allowed this extension into devices as a JSON array, each { id, kind, name, present }: kind is "serial", "hid" or "ble" and present tells whether it is connected now. The user allows devices when the extension's logic asks with hardware.request, such as from its panel, and takes them back on the Extensions page. It needs the permission hardware: GS_EXT_DENIED without it. The device functions are how a DLL with contributes.native.sandbox "restricted" reaches hardware at all, since it runs without rights of its own and needs the permission hardware for claim too; a DLL with full rights may use them as well. Call device_list, device_open, device_write and device_control only from a thread of the DLL's own: they wait for GameScrcpy, at most 20 seconds, and on GameScrcpy's threads they return GS_EXT_UNSUPPORTED. The texts they give stay valid until the same thread calls one of them again. Ask supports("devices") first. */
+    int32_t (*device_list)(void* context, gs_ext_result* devices);
+    /* Opens one of those devices by its id, UTF-8 not ended by a zero byte, and puts the number to use for it into device. options is a UTF-8 JSON object, empty for none; a serial device takes { baudRate, dataBits, parity, stopBits, flowControl, dtr, rts } as hardware.open does in logic. GameScrcpy claims the device's hardware for the extension unless it has it already (see claim) and lets go of it when the device closes. GS_EXT_OK puts { device, id, kind, name } into answer as json; otherwise answer gets the reason as a string: GS_EXT_DENIED when the extension may not use the device (no permission hardware, or the user has not allowed it), GS_EXT_BAD_ARGUMENT for options that are not possible, GS_EXT_FAILED when it is not connected, someone else is using it or it does not open. answer may be NULL. Opening a Bluetooth device can take seconds. */
+    int32_t (*device_open)(void* context, const char* id, size_t id_size, const char* options, size_t options_size, uint64_t* device, gs_ext_result* answer);
+    /* Sends size bytes and returns when the device took them: to a serial device as they are, at most 65536; to a HID device as an output report, with target { "report": id }, at most 4096; to a Bluetooth LE device as the new value of a characteristic, with target { "service": uuid, "characteristic": uuid, "response": true }, at most 512, where response false writes without waiting for the device to confirm. target is UTF-8 JSON, empty for a serial device. GS_EXT_BAD_ARGUMENT for a device that is not open or a target that does not fit it, GS_EXT_FAILED when the device failed; answer, which may be NULL, gets the reason as a string. */
+    int32_t (*device_write)(void* context, uint64_t device, const void* data, size_t size, const char* target, size_t target_size, gs_ext_result* answer);
+    /* Does the rest of what hardware.control does in logic, with request a UTF-8 JSON object whose op says what: "signals" { dtr, rts } sets the lines of a serial device; "sendFeature" { report, data } and "getFeature" { report } send and read a feature report of a HID device; "services" lists the services of a Bluetooth LE device with their characteristics; "read" { service, characteristic } reads a characteristic; "subscribe" { service, characteristic, on } turns its notifications on or off, which then come to device_event. Bytes are base64 text both ways. GS_EXT_OK puts what it gives into answer as json: { data } for getFeature and read, the list for services, null for the others; otherwise answer gets the reason as a string. answer may be NULL. */
+    int32_t (*device_control)(void* context, uint64_t device, const char* request, size_t request_size, gs_ext_result* answer);
+    /* Closes a device the DLL opened. It returns at once and may be called from any thread, also from unload. GameScrcpy closes the DLL's devices itself when the extension stops, and when its process stops. */
+    int32_t (*device_close)(void* context, uint64_t device);
 };
 
 /* One thing a DLL offers. */
@@ -561,7 +828,7 @@ struct gs_ext_plugin {
     uint32_t abi_version;
     /* Passed back to unload. */
     void* context;
-    /* How many contributions there are: at most 8 touch methods, 64 nodes, 32 attachments, 32 behaviors, 32 jobs and 8 device providers. */
+    /* How many contributions there are: at most 8 touch methods, 64 nodes, 32 attachments, 32 behaviors, 32 jobs, 8 device providers, 8 transports, 8 video sources, 8 audio sources, 8 media sinks, 8 recording exporters and 8 frame taps. */
     uint32_t contribution_count;
     /* What the DLL offers. */
     const gs_ext_contribution* contributions;
@@ -571,6 +838,200 @@ struct gs_ext_plugin {
     void (*settings_changed)(void* context, const char* keys, size_t size);
     /* Called on a GameScrcpy thread when someone else wants hardware the DLL claimed: resource names it as the DLL did and by says who, in UTF-8. Answer within a second: return GS_EXT_OK and call release within 3 seconds to let it go, or anything else to keep it. May be NULL, which keeps it. */
     int32_t (*claim_wanted)(void* context, const char* resource, size_t size, const char* by, size_t by_size);
+    /* Called with each event the DLL asked for with events_subscribe: its topic and its value as UTF-8 JSON, neither ended by a zero byte. It comes on a thread of GameScrcpy that never draws the interface, one event at a time and in order; return quickly, since the next events wait and more than 256 waiting are dropped. May be NULL. */
+    void (*on_event)(void* context, const char* topic, size_t topic_size, const char* json, size_t json_size);
+    /* Called with what a device the DLL opened with device_open sends: bytes from a serial device, input reports from a HID device, notifications of Bluetooth LE characteristics it subscribed to, and that a device closed by itself. It comes on a thread of GameScrcpy that never draws the interface, one event at a time and in the order the devices sent them; return quickly, since the next events wait and more than 1024 waiting are dropped. May be NULL. */
+    void (*device_event)(void* context, const gs_ext_device_event* event);
+};
+
+/* An input source: a device of the DLL's own, such as a button pad, a pedal or a controller it reads over HID, serial or Bluetooth, whose buttons and axes the DLL feeds into the key mapping with input_event. A DLL offers at most 8, each with at most 64 slots. It needs the permission input.provide. */
+struct gs_ext_input_source {
+    /* sizeof(gs_ext_input_source) in the DLL. */
+    uint32_t size;
+    /* The name of the source in the manifest's contributes.native.inputSources, which also lists its slots: a lowercase letter followed by lowercase letters and digits, 32 at most. */
+    const char* name;
+};
+
+/* One picture going from a video source to GameScrcpy, or from GameScrcpy to a media sink. */
+struct gs_ext_video_frame {
+    /* sizeof(gs_ext_video_frame) on the side that fills it in. */
+    uint32_t size;
+    /* One of gs_ext_pixel_format. */
+    uint32_t format;
+    /* The width in pixels, from 2 to 4096, even for GS_EXT_PIXEL_NV12; width x height is at most 10,000,000. */
+    uint32_t width;
+    /* The height in pixels, from 2 to 4096, even for GS_EXT_PIXEL_NV12. */
+    uint32_t height;
+    /* The pixels, or the luma plane of GS_EXT_PIXEL_NV12, row after row; they belong to whoever made the frame and are copied before the call returns. */
+    const uint8_t* data;
+    /* How many bytes a row of data takes: at least width x 4 for BGRA and width for NV12. */
+    uint32_t stride;
+    /* The chroma plane of GS_EXT_PIXEL_NV12, height / 2 rows; NULL for BGRA. */
+    const uint8_t* chroma;
+    /* How many bytes a row of chroma takes, at least width; 0 for BGRA. */
+    uint32_t chroma_stride;
+    /* When the picture was taken, in microseconds of the clock of now_us. */
+    uint64_t time_us;
+};
+
+/* Some sound going from an audio source to GameScrcpy, or from GameScrcpy to a media sink. */
+struct gs_ext_audio {
+    /* sizeof(gs_ext_audio) on the side that fills it in. */
+    uint32_t size;
+    /* One of gs_ext_sample_format. */
+    uint32_t format;
+    /* How many channels there are, from 1 to 8. */
+    uint32_t channels;
+    /* The frames a second: always GS_EXT_SOUND_RATE. */
+    uint32_t rate;
+    /* frames x channels samples; they belong to whoever made the sound and are copied before the call returns. */
+    const void* data;
+    /* How many frames there are, one sample of each channel each, from 1 to 48000. */
+    uint32_t frames;
+    /* When the first frame was heard, in microseconds of the clock of now_us. */
+    uint64_t time_us;
+};
+
+/* Pictures that GameScrcpy shows like a capture card, for a phone or on their own, such as a camera, a network stream or the picture of a touch box. It needs the permission media.capture. */
+struct gs_ext_video_source {
+    /* sizeof(gs_ext_video_source) in the DLL. */
+    uint32_t size;
+    /* The name of the source in the manifest's contributes.native.videoSources. */
+    const char* name;
+    /* Passed back to list, open and close. */
+    void* context;
+    /* Puts the pictures that can be opened now into out as a JSON array with set_text, each { id, name }: id is 1 to 64 bytes of UTF-8 that stay the same while the picture is there, and name what the devices page shows. GameScrcpy calls it when the extension turns on and after sources_changed; answer within 100 ms. */
+    int32_t (*list)(void* context, gs_ext_result* out);
+    /* Starts the picture with that id, UTF-8 not ended by a zero byte. params is a UTF-8 JSON object, { phone } with the serial of the phone it is shown for or an empty string when it is shown on its own. Return at once and hand each picture to video_frame with stream from a thread of your own; anything but GS_EXT_OK means it did not start. */
+    int32_t (*open)(void* context, const char* id, size_t id_size, const char* params, size_t params_size, uint64_t stream);
+    /* Stops the picture; video_frame for stream is ignored after close returns. */
+    void (*close)(void* context, uint64_t stream);
+};
+
+/* Sound that GameScrcpy plays with the picture of the extension's video source of the same id. It needs the permission media.capture. */
+struct gs_ext_audio_source {
+    /* sizeof(gs_ext_audio_source) in the DLL. */
+    uint32_t size;
+    /* The name of the source in the manifest's contributes.native.audioSources. */
+    const char* name;
+    /* Passed back to list, open and close. */
+    void* context;
+    /* Puts the sounds that can be opened now into out as a JSON array with set_text, each { id, name }, as a video source lists its pictures. A sound plays with the picture of the extension's video source that has the same id. */
+    int32_t (*list)(void* context, gs_ext_result* out);
+    /* Starts the sound with that id, with params as a video source gets them. Return at once and hand the sound to audio_samples with stream from a thread of your own; anything but GS_EXT_OK means it did not start. */
+    int32_t (*open)(void* context, const char* id, size_t id_size, const char* params, size_t params_size, uint64_t stream);
+    /* Stops the sound; audio_samples for stream is ignored after close returns. */
+    void (*close)(void* context, uint64_t stream);
+};
+
+/* What a media sink gets when the user starts sending a window to it. */
+struct gs_ext_sink_info {
+    /* sizeof(gs_ext_sink_info) in GameScrcpy. */
+    uint32_t size;
+    /* The serial of the phone whose window is sent, UTF-8 ended by a zero byte; valid until close. */
+    const char* device;
+    /* The name GameScrcpy shows for that phone, UTF-8 ended by a zero byte; valid until close. */
+    const char* name;
+    /* The width of every frame, as the manifest declares; 0 when the sink takes no picture. */
+    uint32_t width;
+    /* The height of every frame, as the manifest declares; 0 when the sink takes no picture. */
+    uint32_t height;
+    /* How many frames come a second, as the manifest declares; 0 when the sink takes no picture. */
+    uint32_t fps;
+    /* The gs_ext_pixel_format of the frames, GS_EXT_PIXEL_BGRA; 0 when no picture comes. */
+    uint32_t format;
+    /* The channels of the sound, 2; each gs_ext_audio still says its own. 0 when no sound comes. */
+    uint32_t channels;
+    /* GS_EXT_SOUND_RATE, or 0 when no sound comes. */
+    uint32_t rate;
+    /* The gs_ext_sample_format of the sound, GS_EXT_SAMPLE_F32; 0 when no sound comes. */
+    uint32_t sample_format;
+};
+
+/* Somewhere GameScrcpy sends the picture and the sound of a mirror window, such as a virtual camera, RTMP or SRT streaming or OBS, started from the window's More menu. It needs the permission media.output. frame and audio come from one thread of GameScrcpy, never at the same time. */
+struct gs_ext_media_sink {
+    /* sizeof(gs_ext_media_sink) in the DLL. */
+    uint32_t size;
+    /* The name of the sink in the manifest's contributes.native.mediaSinks. */
+    const char* name;
+    /* Passed back to open. */
+    void* context;
+    /* The user started sending a mirror window here, such as to a virtual camera or a stream; keep what you need in *state. Return within 100 ms and connect on a thread of your own; anything but GS_EXT_OK means it did not start. */
+    int32_t (*open)(void* context, const gs_ext_sink_info* info, void** state);
+    /* One picture of the window, letterboxed into the size of info, about fps times a second. Copy what you need and return quickly; anything but GS_EXT_OK stops the sending. NULL when the sink takes no picture. */
+    int32_t (*frame)(void* state, const gs_ext_video_frame* frame);
+    /* Some sound of the window when the manifest asks for it; copy it and return quickly. NULL when the sink takes no sound. */
+    int32_t (*audio)(void* state, const gs_ext_audio* audio);
+    /* The window closed or the user stopped sending: free the state. frame and audio are not called any more. */
+    void (*close)(void* state);
+};
+
+/* A file format that the recordings list offers under Export as. It needs the permission media.output and counts as one of the extension's at most 4 running jobs. */
+struct gs_ext_recording_exporter {
+    /* sizeof(gs_ext_recording_exporter) in the DLL. */
+    uint32_t size;
+    /* The name of the exporter in the manifest's contributes.native.recordingExporters. */
+    const char* name;
+    /* Passed back to start and cancel. */
+    void* context;
+    /* Turns a recording into a file of the exporter's format, as a job: input is the path of an MP4 video that GameScrcpy made of the recording, output the path the user chose, both UTF-8 not ended by a zero byte. Return at once and work on a thread of your own; tell how far it got with job_progress and end it with job_finish or job_fail, as a gs_ext_job does. */
+    int32_t (*start)(void* context, uint64_t job, const char* input, size_t input_size, const char* output, size_t output_size);
+    /* Asks the export to stop soon; it still ends with job_fail. */
+    void (*cancel)(void* context, uint64_t job);
+};
+
+/* A picture handed to a vision engine: the part of the phone's picture that the logic asked for. In gs-exthost.exe it comes through shared memory that the DLL can only read. */
+struct gs_ext_image {
+    /* sizeof(gs_ext_image) in GameScrcpy. */
+    uint32_t size;
+    /* The pixels, 4 bytes each in the order blue, green, red and alpha (always 255), rows from top to bottom. They belong to GameScrcpy, may only be read and stay valid until run returns. */
+    const uint8_t* pixels;
+    /* How many bytes one row takes, at least 4 * width. */
+    uint32_t stride;
+    /* The width in pixels, from 1 to 4096. */
+    uint32_t width;
+    /* The height in pixels, from 1 to 4096. */
+    uint32_t height;
+};
+
+/* A vision engine: recognizes text, things or what the picture shows for logic, which calls it with vision.recognize() or vision.engine(), next to GameScrcpy's own text recognition. A DLL offers at most 4. It needs no permission, since the logic that asks for it needs device.screen. supports("vision-engines") is 1 when GameScrcpy has them. */
+struct gs_ext_vision_engine {
+    /* sizeof(gs_ext_vision_engine) in the DLL. */
+    uint32_t size;
+    /* The name of the engine in the manifest's contributes.native.visionEngines. */
+    const char* name;
+    /* What it recognizes: the bits 1u << GS_EXT_VISION_OCR, 1u << GS_EXT_VISION_DETECT and 1u << GS_EXT_VISION_CLASSIFY, at least those the manifest's kinds name. */
+    uint32_t kinds;
+    /* Passed back to run. */
+    void* context;
+    /* Recognizes kind, one of gs_ext_vision_kind, in image, the part of the phone's picture the logic asked for. params is the UTF-8 JSON object of size bytes, not ended by a zero byte, that the logic passed ("{}" when it passed none). Put the result into out as a JSON array with set_text and return GS_EXT_OK: x and y are the middle of what was found and width and height its size, all as ratios of the image from 0 to 1, and confidence goes from 0 to 1; GameScrcpy turns them into ratios of the whole picture for the logic. Return GS_EXT_BAD_ARGUMENT for params it does not take, or call set_error and return GS_EXT_FAILED. GameScrcpy calls it on a thread of its own that never draws the interface, one call at a time for each engine, perhaps at the same time as nodes, jobs and other engines. When it takes longer than 5 seconds the logic gets an error, and the engine takes the next picture only after it returns. */
+    int32_t (*run)(void* context, uint32_t kind, const gs_ext_image* image, const char* params, size_t size, gs_ext_result* out);
+};
+
+/* What a device the DLL opened through GameScrcpy sends, given to device_event. */
+struct gs_ext_device_event {
+    /* sizeof(gs_ext_device_event) in GameScrcpy. */
+    uint32_t size;
+    /* One of gs_ext_device_event_type. */
+    uint32_t type;
+    /* The device, by the number device_open gave. */
+    uint64_t device;
+    /* GS_EXT_DEVICE_REPORT: the id of the report; 0 otherwise. */
+    uint32_t report;
+    /* GS_EXT_DEVICE_NOTIFY: the UUID of the service in lowercase, ended by a zero byte; an empty text otherwise. */
+    const char* service;
+    /* GS_EXT_DEVICE_NOTIFY: the UUID of the characteristic in lowercase, ended by a zero byte; an empty text otherwise. */
+    const char* characteristic;
+    /* The bytes that came; they belong to GameScrcpy and stay valid only during the call. */
+    const uint8_t* data;
+    /* How many bytes data has. */
+    size_t data_size;
+    /* GS_EXT_DEVICE_CLOSED: "removed" when the device was unplugged or went away, "failed" when it stopped working, "forgotten" when the user took back the extension's access to it; ended by a zero byte. An empty text otherwise. */
+    const char* reason;
+    /* GS_EXT_DEVICE_CLOSED: why, in words, UTF-8 not ended by a zero byte; empty otherwise. */
+    const char* text;
+    /* How many bytes text has. */
+    size_t text_size;
 };
 
 /* The function a native extension DLL exports. GameScrcpy calls it once after loading the DLL: set *plugin to the DLL's own description and return GS_EXT_OK, or GS_EXT_UNSUPPORTED when host->abi_version is not one the DLL supports. The description, and everything it points to, has to stay valid until unload is called; GameScrcpy never writes to it. */
