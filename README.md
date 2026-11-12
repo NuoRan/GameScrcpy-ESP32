@@ -20,10 +20,11 @@
 
 详细说明（接线、什么时候按 BOOT、各种提示的意思）在程序“帮助”页的“扩展”一组里，原文是 [docs/help/esp32.zh_CN.md](docs/help/esp32.zh_CN.md)。
 
-### 与 GameScrcpy 内置 ESP32 的关系
+### 从 GameScrcpy 2.0 的内置 ESP32 换过来
 
-- 这个扩展不读内置扩展 `gamescrcpy.esp32` 的东西：内置的触控方式与 `esp32.*` 设置不迁移，板子的 Wi-Fi 要在这个扩展里重新设置一次。
-- 两者同时打开时会抢同一个串口；用这个扩展时请在“扩展”页关掉内置的 ESP32 触控盒。
+- GameScrcpy 2.1 起不再自带 ESP32 触控盒，ESP32 只经这个扩展使用。
+- 2.0 的设置不迁移：手机设置里的触控方式“ESP32”与 `esp32.*` 设置在 2.1 里都不再认（手机回到普通触控，采集卡的触控回到“无”）。装好这个扩展后，重新为手机选触控方式，并在这个扩展里重新设置一次板子的 Wi-Fi。
+- 板子上 1.0.x 的固件照常能用；电脑经蓝牙连板子要固件 1.1，板子窗口的“固件”里可以升级。
 - GameScrcpy 安装扩展时检查 DLL 用到的系统功能：这个 DLL 用 `CreateFile` 打开串口、读自带的固件镜像，安装框可能提示“它的代码会读写文件”。它不读写你的其它文件。
 
 ## 仓库里有什么
@@ -37,7 +38,7 @@
 | `native/touchbox` | 扩展本身：找板子、触控方式、设备提供者、长任务、节点、事件，以及导出 `gs_ext_main` 的 `esp32.dll` |
 | `firmware/` | ESP-IDF v6.1 固件工程与编好的镜像 `release/`（原 GameScrcpy `firmware/esp32`） |
 | `protocol/` | 电脑 ↔ 板子协议：`SPEC.md`、共用的 C 头文件、向量生成器与金标准向量 |
-| `sdk/include/gamescrcpy_ext.h` | GameScrcpy 原生扩展接口的 C 头文件，取自 GameScrcpy 提交 `6a26cb0e`（2.1.0 开发中，ABI 2）；对着哪个版本的 GameScrcpy 编译，就用那个版本 `sdk/include/` 里的同名文件替换 |
+| `sdk/include/gamescrcpy_ext.h` | GameScrcpy 原生扩展接口的 C 头文件，取自 GameScrcpy 2.1.0（ABI 2）；对着哪个版本的 GameScrcpy 编译，就用那个版本 `sdk/include/` 里的同名文件替换 |
 | `docs/help/` | 扩展自带的帮助文章（英文、简体中文） |
 | `tools/` | `pack.ps1`（出扩展包）、`build_firmware.ps1`（编固件）、`fake_esp32.py`（Wi-Fi 上的假板子） |
 | `tests/unit` | doctest 单元测试：协议向量、链路与握手、刷写流程、找板子、扩展的 C 接口 |
@@ -103,6 +104,6 @@ $tests = Get-ChildItem tests\extension\*.json | ForEach-Object { '--test'; $_.Fu
 
 ## 还没做的
 
-- `firmware/release/` 里的镜像还是 1.0.2：要装好 ESP-IDF v6.1 后用 `tools\build_firmware.ps1` 按 1.1.0 的源码重新编译，扩展带的固件才有电脑用的蓝牙服务。
+- 固件 1.1.0 的电脑 ↔ 板子蓝牙还没有在真板子上核对过。
 
 发布地址由维护者发布时补上。

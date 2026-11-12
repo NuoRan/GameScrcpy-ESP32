@@ -20,10 +20,11 @@ Turns an ESP32 development board into the phone's plugged-in touch screen, keybo
 
 The details (wiring, when to hold BOOT, what the messages mean) are in the Extensions group of GameScrcpy's Help page; the source is [docs/help/esp32.md](docs/help/esp32.md).
 
-### The built-in ESP32 of GameScrcpy
+### Coming from the built-in ESP32 of GameScrcpy 2.0
 
-- This extension reads nothing of the built-in `gamescrcpy.esp32`: its touch method and `esp32.*` settings are not carried over, and a board's Wi-Fi has to be set up once more here.
-- With both on they fight over the same serial port; turn the built-in ESP32 touch box off on the Extensions page while you use this one.
+- From 2.1 on, GameScrcpy no longer comes with the ESP32 touch box; ESP32 boards work only through this extension.
+- The settings of 2.0 are not carried over: the touch method "ESP32" in a phone's settings and the `esp32.*` settings are no longer known in 2.1 (the phone goes back to normal touches, and a capture card's touches to None). Once this extension is installed, choose the touch method for the phone again and set up the board's Wi-Fi once more here.
+- Boards with firmware 1.0.x keep working; reaching a board over Bluetooth from the computer needs firmware 1.1, which Firmware in the board's window can install.
 - When it installs an extension, GameScrcpy checks the system functions the DLL uses: this DLL opens serial ports with `CreateFile` and reads its own firmware images, so the install dialog may say its code reads and writes files. It touches no other files.
 
 ## Layout
@@ -37,7 +38,7 @@ The details (wiring, when to hold BOOT, what the messages mean) are in the Exten
 | `native/touchbox` | The extension itself: finding boards, the touch method, the device provider, jobs, nodes, events, and `esp32.dll` that exports `gs_ext_main` |
 | `firmware/` | The ESP-IDF v6.1 firmware project and its built images in `release/` (GameScrcpy's `firmware/esp32`) |
 | `protocol/` | The computer ↔ board protocol: `SPEC.md`, the shared C header, the vector generator and the golden vectors |
-| `sdk/include/gamescrcpy_ext.h` | The C header of GameScrcpy's native extension interface, taken from GameScrcpy commit `6a26cb0e` (2.1.0 in development, ABI 2); replace it with the one in `sdk/include/` of the GameScrcpy release you build against |
+| `sdk/include/gamescrcpy_ext.h` | The C header of GameScrcpy's native extension interface, taken from GameScrcpy 2.1.0 (ABI 2); replace it with the one in `sdk/include/` of the GameScrcpy release you build against |
 | `docs/help/` | The help article the extension brings (English and Simplified Chinese) |
 | `tools/` | `pack.ps1` (makes the package), `build_firmware.ps1` (builds the firmware), `fake_esp32.py` (a fake board on Wi-Fi) |
 | `tests/unit` | doctest unit tests: protocol vectors, link and handshake, flashing, finding boards, the extension's C interface |
@@ -103,6 +104,6 @@ Events (`events.on(topic, ({ value }) => …)`): `board.added`, `board.changed`,
 
 ## Not done yet
 
-- The images in `firmware/release/` are still 1.0.2: rebuild them from the 1.1.0 sources with `tools\build_firmware.ps1` (ESP-IDF v6.1) so that the firmware the extension brings has the Bluetooth service for the computer.
+- Bluetooth between the computer and the board in firmware 1.1.0 has not been checked on a real board yet.
 
 The download address is added by the maintainers when they publish a release.
