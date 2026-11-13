@@ -6,6 +6,8 @@
   "description": "An ESP32 board on the phone's USB port or Bluetooth becomes its touch screen, keyboard, mouse and gamepad, so the phone can be controlled without USB debugging. The extension finds the boards, shows them on the devices page, flashes their firmware, sets up their Wi-Fi and pairs them with this computer over Bluetooth.",
   "authors": ["GameScrcpy 社区"],
   "license": "Apache-2.0",
+  "repository": "https://github.com/NuoRan/GameScrcpy-ESP32",
+  "gamescrcpy": "2.1",
   "requires": {
     "native": "^2.0",
     "script": "^1.1",
