@@ -7,9 +7,9 @@
   "authors": ["GameScrcpy 社区"],
   "license": "Apache-2.0",
   "requires": {
-    "native": "^1.0",
-    "script": "^1.0",
-    "panel": "^1.0",
+    "native": "^2.0",
+    "script": "^1.1",
+    "panel": "^1.1",
     "help": "^1.0"
   },
   "contributes": {
