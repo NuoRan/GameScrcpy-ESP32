@@ -100,7 +100,7 @@ type Esp32 = {
     unpair(args: { device: string }): ExtensionJob<StoreValue>;
 };
 
-const box = ext.community.esp32 as Esp32;
+const esp32 = (): Esp32 => ext.community.esp32 as Esp32;
 
 const english = {
     intro: "Plug the board's serial port into this computer, or set up its Wi-Fi once. Each phone picks the board in its own settings of this extension.",
@@ -250,7 +250,7 @@ const chinese: typeof english = {
     help: "接线、刷写与各种提示的意思见帮助文章“ESP32 触控盒”。",
 };
 
-const say = safely(() => box.language(), "en") === "zh_CN" ? chinese : english;
+const say = safely(() => esp32().language(), "en") === "zh_CN" ? chinese : english;
 
 const main = ui.panel("main");
 const sheet = ui.panel("board");
@@ -309,17 +309,17 @@ function numberIn(fields: Fields, key: string): number {
 }
 
 function boardsNow(): Board[] {
-    const listed = safely(() => box.boards(), []);
+    const listed = safely(() => esp32().boards(), []);
     return Array.isArray(listed) ? listed : [];
 }
 
 function portsNow(): SerialPort[] {
-    const listed = safely(() => box.ports(), []);
+    const listed = safely(() => esp32().ports(), []);
     return Array.isArray(listed) ? listed : [];
 }
 
 function radioNow(): Radio {
-    const found = safely<Radio | null>(() => box.bluetooth(), null);
+    const found = safely<Radio | null>(() => esp32().bluetooth(), null);
     if (found === null || typeof found !== "object" || !Array.isArray(found.boards) || !Array.isArray(found.paired)) {
         return { state: "unknown", stateText: "", scanning: false, boards: [], paired: [] };
     }
@@ -461,7 +461,7 @@ function renderMain(): void {
     }
     const listed = boardsNow();
     const ports = portsNow();
-    const firmware = safely(() => box.firmware(), null);
+    const firmware = safely(() => esp32().firmware(), null);
     if (chosenPort === "" || !ports.some((port) => port.name === chosenPort)) {
         const likely = ports.find((port) => port.likely);
         chosenPort = likely !== undefined ? likely.name : ports.length > 0 ? ports[0].name : "";
@@ -476,7 +476,7 @@ function renderMain(): void {
         stateText: board.stateText,
     }));
     if (boardNodes.length === 0) {
-        const problem = safely(() => box.problem(), "");
+        const problem = safely(() => esp32().problem(), "");
         boardNodes.push({ type: "text", text: problem !== "" ? problem : say.noBoards, tone: problem !== "" ? "warn" : "muted" });
     }
     boardNodes.push({ type: "row", children: [{ type: "button", id: "rescan", title: say.rescan, icon: "refresh-cw" }] });
@@ -694,7 +694,7 @@ async function startFlash(device: string): Promise<void> {
     flash = { device, port: device, running: true, fraction: 0, stage: "preparing", text: "", failed: false };
     renderAll();
     try {
-        await box.flash({ device }).result;
+        await esp32().flash({ device }).result;
     } catch (error) {
         if (flash.running) {
             flash = { ...flash, running: false, failed: true, text: messageOf(error) };
@@ -720,7 +720,7 @@ async function startScan(): Promise<void> {
     bluetoothNote = null;
     renderMain();
     try {
-        await box
+        await esp32()
             .scan({})
             .onProgress((fraction, text) => {
                 if (scan.running) {
@@ -778,7 +778,7 @@ main.on(
     "click",
     async ({ id }) => {
         if (id === "rescan") {
-            safely(() => box.rescan(), false);
+            safely(() => esp32().rescan(), false);
             renderMain();
         } else if (id === "flash") {
             await startFlash(chosenPort);
@@ -789,7 +789,7 @@ main.on(
             const device = id.substring(id.indexOf(":") + 1);
             const note = await runPairing(
                 device,
-                () => (pairs ? box.pair({ device }) : box.unpair({ device })),
+                () => (pairs ? esp32().pair({ device }) : esp32().unpair({ device })),
                 pairs ? say.pairedDone : say.unpaired,
             );
             if (note !== null) {
@@ -845,26 +845,26 @@ sheet.on(
             return;
         }
         if (id === "tap") {
-            const tapped = safely(() => box.tap(device), false);
+            const tapped = safely(() => esp32().tap(device), false);
             tapNote = { text: tapped ? say.tapped : say.notTapped, failed: !tapped };
         } else if (id === "disconnect") {
-            safely(() => box.disconnect(device), false);
+            safely(() => esp32().disconnect(device), false);
         } else if (id === "flash") {
             await startFlash(device);
             return;
         } else if (id === "wifiSave") {
-            wifiNote = await runNote(() => box.wifi({ device, ssid: ssid.trim(), password }), say.wifiSent);
+            wifiNote = await runNote(() => esp32().wifi({ device, ssid: ssid.trim(), password }), say.wifiSent);
             if (!wifiNote.failed) {
                 password = "";
             }
         } else if (id === "wifiForget") {
-            wifiNote = await runNote(() => box.wifi({ device, ssid: "", password: "" }), say.wifiForgotten);
+            wifiNote = await runNote(() => esp32().wifi({ device, ssid: "", password: "" }), say.wifiForgotten);
         } else if (id === "rename") {
-            renameNote = await runNote(() => box.rename({ device, name: boardName.trim() }), say.renamed);
+            renameNote = await runNote(() => esp32().rename({ device, name: boardName.trim() }), say.renamed);
         } else if (id === "pair" || id === "unpair") {
             const note = await runPairing(
                 device,
-                () => (id === "pair" ? box.pair({ device }) : box.unpair({ device })),
+                () => (id === "pair" ? esp32().pair({ device }) : esp32().unpair({ device })),
                 id === "pair" ? say.pairedDone : say.unpaired,
             );
             if (note !== null) {
@@ -876,7 +876,7 @@ sheet.on(
             diagnosis = { device, ok: true, text: "…", rows: [] };
             renderBoard();
             try {
-                await box.diagnose({ device }).result;
+                await esp32().diagnose({ device }).result;
             } catch (error) {
                 if (diagnosis !== null && diagnosis.device === device && diagnosis.text === "…") {
                     diagnosis = { device, ok: false, text: messageOf(error), rows: [] };
