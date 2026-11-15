@@ -4,37 +4,37 @@
     "targets":  {
                     "esp32s3":  {
                                     "file":  "gs-esp32-esp32s3.bin",
-                                    "sha256":  "559de5222abdd14322d9be2a4f06d4168373d64fb2a72935d789d521c39da2d3",
+                                    "sha256":  "ce5c9245deb77f904bf48763c63e7a1da5727f705335eb20f8d23d7cafb2c0e3",
                                     "flashSize":  "4MB",
                                     "chipId":  9
                                 },
                     "esp32s2":  {
                                     "file":  "gs-esp32-esp32s2.bin",
-                                    "sha256":  "fbad19eaa9e662c3cc6ad417104af07ca19321bdfbc1596a939b6b7ace3d9385",
+                                    "sha256":  "28d99097677ae85209c81bd7bf3b9689a89abb3a94e41c6caca992000a0ce1c8",
                                     "flashSize":  "4MB",
                                     "chipId":  2
                                 },
                     "esp32p4":  {
                                     "file":  "gs-esp32-esp32p4.bin",
-                                    "sha256":  "08cc097dfcad5a3ccd390af07dd0ba642700a14aabf8adaaec5216ee465fa719",
+                                    "sha256":  "cfee9b96b9af39a2dbd200794dc12e0a962111b5161cb233d78048b5c9eced49",
                                     "flashSize":  "4MB",
                                     "chipId":  18
                                 },
                     "esp32":  {
                                   "file":  "gs-esp32-esp32.bin",
-                                  "sha256":  "97e9fb9e521c1191f2e8d742707c90cbd397bd9184aa45014fa01a963f197f90",
+                                  "sha256":  "a1db30397896297ff7612afd21e6ee39ebfa782336d8931b76bd87ed001388d0",
                                   "flashSize":  "4MB",
                                   "chipId":  0
                               },
                     "esp32c3":  {
                                     "file":  "gs-esp32-esp32c3.bin",
-                                    "sha256":  "2417a199fb06a37539638dd27ad347cc4fad63594e4144f81bde455fbad522a6",
+                                    "sha256":  "517b58200470fcadcbb41b699c690bfadf73d12ddef40ecb33aa5e212a4731ba",
                                     "flashSize":  "4MB",
                                     "chipId":  5
                                 },
                     "esp32c6":  {
                                     "file":  "gs-esp32-esp32c6.bin",
-                                    "sha256":  "89c944bddb96010da8583925178262e9c785c9d4722952134a69d1850368bf14",
+                                    "sha256":  "a089af736fb16bb7f190e72c68039042553c4e4c7f2291c60192cec3b253dd5a",
                                     "flashSize":  "4MB",
                                     "chipId":  13
                                 }
