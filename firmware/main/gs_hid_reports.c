@@ -51,13 +51,10 @@ size_t gs_report_consumer(uint16_t usage, uint8_t out[GS_CONSUMER_REPORT_SIZE])
 
 size_t gs_report_mouse(const gs_esp32_mouse *mouse, uint8_t out[GS_MOUSE_REPORT_SIZE])
 {
-    const int wheel = mouse->wheel < -GS_HID_WHEEL_MAX
-                          ? -GS_HID_WHEEL_MAX
-                          : (mouse->wheel > GS_HID_WHEEL_MAX ? GS_HID_WHEEL_MAX : mouse->wheel);
     out[0] = (uint8_t)(mouse->buttons & 0x1Fu);
     gs_store_u16(out + 1, (uint16_t)gs_axis(mouse->dx));
     gs_store_u16(out + 3, (uint16_t)gs_axis(mouse->dy));
-    out[5] = (uint8_t)(wheel & 0xFF);
+    out[5] = (uint8_t)(mouse->wheel < -GS_HID_WHEEL_MAX ? -GS_HID_WHEEL_MAX : mouse->wheel);
     return GS_MOUSE_REPORT_SIZE;
 }
 
