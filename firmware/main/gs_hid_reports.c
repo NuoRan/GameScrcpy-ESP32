@@ -10,7 +10,7 @@ static void gs_store_u16(uint8_t *out, uint16_t value)
 
 static int16_t gs_axis(int16_t value)
 {
-    return value < -32767 ? (int16_t)-32767 : value;
+    return value < -GS_HID_AXIS_MAX ? (int16_t)-GS_HID_AXIS_MAX : value;
 }
 
 size_t gs_report_touch(const gs_esp32_touch *touch, uint8_t out[GS_TOUCH_REPORT_SIZE])
@@ -45,10 +45,13 @@ size_t gs_report_consumer(uint16_t usage, uint8_t out[GS_CONSUMER_REPORT_SIZE])
 
 size_t gs_report_mouse(const gs_esp32_mouse *mouse, uint8_t out[GS_MOUSE_REPORT_SIZE])
 {
+    const int wheel = mouse->wheel < -GS_HID_WHEEL_MAX
+                          ? -GS_HID_WHEEL_MAX
+                          : (mouse->wheel > GS_HID_WHEEL_MAX ? GS_HID_WHEEL_MAX : mouse->wheel);
     out[0] = (uint8_t)(mouse->buttons & 0x1Fu);
     gs_store_u16(out + 1, (uint16_t)gs_axis(mouse->dx));
     gs_store_u16(out + 3, (uint16_t)gs_axis(mouse->dy));
-    out[5] = (uint8_t)(mouse->wheel < -127 ? -127 : mouse->wheel);
+    out[5] = (uint8_t)(wheel & 0xFF);
     return GS_MOUSE_REPORT_SIZE;
 }
 

@@ -102,6 +102,10 @@ $tests = Get-ChildItem tests\extension\*.json | ForEach-Object { '--test'; $_.Fu
 - 固件：装好 ESP-IDF v6.1 后运行 `tools\build_firmware.ps1`，它编译六个型号、合并镜像并更新 `firmware/release/firmware.json`。说明见 [firmware/README.md](firmware/README.md)。
 - 协议：[protocol/SPEC.md](protocol/SPEC.md)。改协议的顺序是 SPEC → `protocol/gen_vectors.py` → `gs_esp32_protocol.h` → 测试，向量不手改。
 
+## 更新记录
+
+- 1.1.1：USB：鼠标移动很密时触控不再被丢掉（视角释放时 WASD 失灵）。
+
 ## 还没做的
 
 - 固件 1.1.0 的电脑 ↔ 板子蓝牙还没有在真板子上核对过。

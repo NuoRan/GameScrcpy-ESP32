@@ -17,11 +17,13 @@ gs_add_unit_test(gs_esp32_tests
         unit/esp32/FakeRom.h
         unit/esp32/FirmwareTests.cpp
         unit/esp32/FlasherTests.cpp
+        unit/esp32/HidScheduleTests.cpp
         unit/esp32/KeysTests.cpp
         unit/esp32/LinkTests.cpp
         unit/esp32/PortTests.cpp
         unit/esp32/ProtocolTests.cpp
         unit/esp32/TestSupport.h
+        "${PROJECT_SOURCE_DIR}/firmware/main/gs_hid_sched.c"
     LIBRARIES
         gs::esp32
         gs::espflash
@@ -29,6 +31,7 @@ gs_add_unit_test(gs_esp32_tests
         gs::nlohmann_json
         gs::support
 )
+target_include_directories(gs_esp32_tests PRIVATE "${PROJECT_SOURCE_DIR}/firmware/main")
 target_compile_definitions(gs_esp32_tests PRIVATE
     GS_ESP32_VECTORS="${PROJECT_SOURCE_DIR}/protocol/vectors.json"
     GS_ESP32_RELEASE_DIR="${PROJECT_SOURCE_DIR}/firmware/release"

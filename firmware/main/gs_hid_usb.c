@@ -5,7 +5,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
@@ -14,6 +14,7 @@
 #include "gs_hid.h"
 #include "gs_hid_descriptors.h"
 #include "gs_hid_reports.h"
+#include "gs_hid_sched.h"
 
 #define GS_USB_VID 0x303A
 #define GS_USB_PID 0x40A5
@@ -21,15 +22,14 @@
 #define GS_USB_POWER_MA 100
 #define GS_USB_INTERVAL 1
 #define GS_USB_ENDPOINT_SIZE 64
-#define GS_USB_QUEUE_LENGTH 32
-#define GS_USB_SEND_WAIT_US 50000
+#define GS_USB_DROP_LOG_US 1000000
 
 enum {
-    GS_ITF_TOUCH = 0,
-    GS_ITF_KEYBOARD = 1,
-    GS_ITF_MOUSE = 2,
-    GS_ITF_GAMEPAD = 3,
-    GS_ITF_COUNT = 4,
+    GS_ITF_TOUCH = GS_HID_INTERFACE_TOUCH,
+    GS_ITF_KEYBOARD = GS_HID_INTERFACE_KEYBOARD,
+    GS_ITF_MOUSE = GS_HID_INTERFACE_MOUSE,
+    GS_ITF_GAMEPAD = GS_HID_INTERFACE_GAMEPAD,
+    GS_ITF_COUNT = GS_HID_INTERFACE_COUNT,
 };
 
 #define GS_EP_TOUCH 0x81
@@ -38,17 +38,25 @@ enum {
 #define GS_EP_GAMEPAD 0x84
 #define GS_CONFIG_LENGTH (TUD_CONFIG_DESC_LEN + GS_ITF_COUNT * TUD_HID_DESC_LEN)
 
-typedef struct {
-    uint8_t instance;
-    uint8_t report_id;
-    uint8_t length;
-    uint8_t data[GS_LARGEST_REPORT];
-} gs_usb_report;
-
 static const char *gs_tag = "gs_usb";
-static QueueHandle_t gs_queue;
 static TaskHandle_t gs_sender;
 static char gs_serial[13];
+
+typedef struct {
+    uint8_t report_id;
+    uint8_t length;
+    uint8_t data[GS_KEYBOARD_REPORT_SIZE];
+} gs_usb_keyboard_report;
+
+static gs_esp32_touch gs_touch_items[GS_HID_TOUCH_STATES];
+static gs_usb_keyboard_report gs_keyboard_items[GS_HID_KEYBOARD_STATES];
+static gs_esp32_gamepad gs_gamepad_items[GS_HID_GAMEPAD_STATES];
+static gs_hid_state_queue gs_touch_queue;
+static gs_hid_state_queue gs_keyboard_queue;
+static gs_hid_state_queue gs_gamepad_queue;
+static gs_hid_mouse_merge gs_mouse;
+static SemaphoreHandle_t gs_state_lock;
+static int64_t gs_drop_logged;
 
 static const tusb_desc_device_t gs_device = {
     .bLength = sizeof(tusb_desc_device_t),
@@ -149,46 +157,213 @@ void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_
     }
 }
 
-static void gs_send_task(void *argument)
+static void gs_clear_all(void)
 {
-    (void)argument;
-    gs_usb_report report;
-    for (;;) {
-        if (xQueueReceive(gs_queue, &report, portMAX_DELAY) != pdTRUE) {
-            continue;
-        }
-        const int64_t deadline = esp_timer_get_time() + GS_USB_SEND_WAIT_US;
-        while (tud_mounted() && !tud_hid_n_ready(report.instance) && esp_timer_get_time() < deadline) {
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2));
-        }
-        if (tud_mounted() && tud_hid_n_ready(report.instance)) {
-            tud_hid_n_report(report.instance, report.report_id, report.data, report.length);
-        }
-    }
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    gs_hid_state_queue_clear(&gs_touch_queue);
+    gs_hid_state_queue_clear(&gs_keyboard_queue);
+    gs_hid_state_queue_clear(&gs_gamepad_queue);
+    gs_hid_mouse_merge_clear(&gs_mouse);
+    xSemaphoreGive(gs_state_lock);
 }
 
-static bool gs_enqueue(uint8_t instance, uint8_t report_id, const uint8_t *data, size_t length)
+static void gs_note_drops(void)
 {
-    gs_usb_report report;
-    if (gs_queue == NULL || length > sizeof(report.data) || !tud_mounted()) {
+    const int64_t now = esp_timer_get_time();
+    uint32_t touch = 0;
+    uint32_t keyboard = 0;
+    uint32_t mouse = 0;
+    uint32_t gamepad = 0;
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    if (now - gs_drop_logged < (int64_t)GS_USB_DROP_LOG_US) {
+        xSemaphoreGive(gs_state_lock);
+        return;
+    }
+    gs_drop_logged = now;
+    touch = gs_hid_state_queue_dropped(&gs_touch_queue);
+    keyboard = gs_hid_state_queue_dropped(&gs_keyboard_queue);
+    mouse = gs_hid_mouse_merge_dropped(&gs_mouse);
+    gamepad = gs_hid_state_queue_dropped(&gs_gamepad_queue);
+    xSemaphoreGive(gs_state_lock);
+    ESP_LOGW(gs_tag, "USB reports dropped so far: touch %u, keyboard %u, mouse %u, gamepad %u", (unsigned)touch,
+             (unsigned)keyboard, (unsigned)mouse, (unsigned)gamepad);
+}
+
+static bool gs_accepting(void)
+{
+    if (gs_state_lock == NULL || gs_sender == NULL) {
         return false;
     }
-    report.instance = instance;
-    report.report_id = report_id;
-    report.length = (uint8_t)length;
-    memcpy(report.data, data, length);
-    return xQueueSend(gs_queue, &report, 0) == pdTRUE;
+    if (!tud_mounted()) {
+        gs_clear_all();
+        return false;
+    }
+    return true;
+}
+
+static uint8_t gs_pending(void)
+{
+    uint8_t mask = 0;
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    if (gs_hid_state_queue_pending(&gs_touch_queue)) {
+        mask |= (uint8_t)(1u << GS_ITF_TOUCH);
+    }
+    if (gs_hid_state_queue_pending(&gs_keyboard_queue)) {
+        mask |= (uint8_t)(1u << GS_ITF_KEYBOARD);
+    }
+    if (gs_hid_mouse_merge_pending(&gs_mouse)) {
+        mask |= (uint8_t)(1u << GS_ITF_MOUSE);
+    }
+    if (gs_hid_state_queue_pending(&gs_gamepad_queue)) {
+        mask |= (uint8_t)(1u << GS_ITF_GAMEPAD);
+    }
+    xSemaphoreGive(gs_state_lock);
+    return mask;
+}
+
+static uint8_t gs_ready(void)
+{
+    uint8_t mask = 0;
+    uint8_t instance;
+    for (instance = 0; instance < GS_ITF_COUNT; ++instance) {
+        if (tud_hid_n_ready(instance)) {
+            mask |= (uint8_t)(1u << instance);
+        }
+    }
+    return mask;
+}
+
+static bool gs_send_touch(void)
+{
+    const gs_esp32_touch *head;
+    gs_esp32_touch state;
+    uint8_t report[GS_TOUCH_REPORT_SIZE];
+    bool sent = false;
+    size_t length;
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    head = (const gs_esp32_touch *)gs_hid_state_queue_head(&gs_touch_queue);
+    if (head != NULL) {
+        memcpy(&state, head, sizeof(state));
+        length = gs_report_touch(&state, report);
+        sent = tud_hid_n_report(GS_ITF_TOUCH, GS_REPORT_TOUCH, report, (uint16_t)length);
+        if (sent) {
+            gs_hid_state_queue_pop(&gs_touch_queue);
+        }
+    }
+    xSemaphoreGive(gs_state_lock);
+    return sent;
+}
+
+static bool gs_send_keyboard(void)
+{
+    const gs_usb_keyboard_report *head;
+    gs_usb_keyboard_report item;
+    bool sent = false;
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    head = (const gs_usb_keyboard_report *)gs_hid_state_queue_head(&gs_keyboard_queue);
+    if (head != NULL) {
+        memcpy(&item, head, sizeof(item));
+        sent = tud_hid_n_report(GS_ITF_KEYBOARD, item.report_id, item.data, item.length);
+        if (sent) {
+            gs_hid_state_queue_pop(&gs_keyboard_queue);
+        }
+    }
+    xSemaphoreGive(gs_state_lock);
+    return sent;
+}
+
+static bool gs_send_mouse(void)
+{
+    gs_esp32_mouse chunk;
+    uint8_t report[GS_MOUSE_REPORT_SIZE];
+    bool sent = false;
+    size_t length;
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    if (gs_hid_mouse_merge_peek(&gs_mouse, GS_HID_AXIS_MAX, GS_HID_WHEEL_MAX, &chunk)) {
+        length = gs_report_mouse(&chunk, report);
+        sent = tud_hid_n_report(GS_ITF_MOUSE, GS_REPORT_MOUSE, report, (uint16_t)length);
+        if (sent) {
+            gs_hid_mouse_merge_commit(&gs_mouse, &chunk);
+        }
+    }
+    xSemaphoreGive(gs_state_lock);
+    return sent;
+}
+
+static bool gs_send_gamepad(void)
+{
+    const gs_esp32_gamepad *head;
+    gs_esp32_gamepad state;
+    uint8_t report[GS_GAMEPAD_REPORT_SIZE];
+    bool sent = false;
+    size_t length;
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    head = (const gs_esp32_gamepad *)gs_hid_state_queue_head(&gs_gamepad_queue);
+    if (head != NULL) {
+        memcpy(&state, head, sizeof(state));
+        length = gs_report_gamepad(&state, report);
+        sent = tud_hid_n_report(GS_ITF_GAMEPAD, GS_REPORT_GAMEPAD, report, (uint16_t)length);
+        if (sent) {
+            gs_hid_state_queue_pop(&gs_gamepad_queue);
+        }
+    }
+    xSemaphoreGive(gs_state_lock);
+    return sent;
+}
+
+static void gs_send_task(void *argument)
+{
+    uint8_t cursor = GS_ITF_COUNT - 1;
+    (void)argument;
+    for (;;) {
+        uint8_t pending;
+        uint8_t next;
+        if (!tud_mounted()) {
+            gs_clear_all();
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
+        }
+        pending = gs_pending();
+        next = pending != 0 ? gs_hid_pick_interface(pending, gs_ready(), cursor) : GS_HID_INTERFACE_NONE;
+        if (next == GS_HID_INTERFACE_NONE) {
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
+        }
+        cursor = next;
+        switch (next) {
+        case GS_ITF_TOUCH:
+            gs_send_touch();
+            break;
+        case GS_ITF_KEYBOARD:
+            gs_send_keyboard();
+            break;
+        case GS_ITF_MOUSE:
+            gs_send_mouse();
+            break;
+        default:
+            gs_send_gamepad();
+            break;
+        }
+    }
 }
 
 bool gs_hid_start(const char *name, const uint8_t mac[6])
 {
     (void)name;
     snprintf(gs_serial, sizeof(gs_serial), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    gs_queue = xQueueCreate(GS_USB_QUEUE_LENGTH, sizeof(gs_usb_report));
-    if (gs_queue == NULL) {
-        ESP_LOGE(gs_tag, "could not make the USB report queue; the board keeps running without USB");
+    gs_state_lock = xSemaphoreCreateMutex();
+    if (gs_state_lock == NULL) {
+        ESP_LOGE(gs_tag, "could not make the USB state lock; the board keeps running without USB");
         return false;
     }
+    gs_hid_state_queue_init(&gs_touch_queue, gs_touch_items, (uint8_t)GS_HID_TOUCH_STATES,
+                            (uint8_t)sizeof(gs_esp32_touch));
+    gs_hid_state_queue_init(&gs_keyboard_queue, gs_keyboard_items, (uint8_t)GS_HID_KEYBOARD_STATES,
+                            (uint8_t)sizeof(gs_usb_keyboard_report));
+    gs_hid_state_queue_init(&gs_gamepad_queue, gs_gamepad_items, (uint8_t)GS_HID_GAMEPAD_STATES,
+                            (uint8_t)sizeof(gs_esp32_gamepad));
+    gs_hid_mouse_merge_init(&gs_mouse);
+    gs_drop_logged = 0;
     if (xTaskCreate(gs_send_task, "gs_usb_send", 4096, NULL, configMAX_PRIORITIES - 2, &gs_sender) != pdPASS) {
         ESP_LOGE(gs_tag, "could not start the USB sender; the board keeps running without USB");
         return false;
@@ -213,37 +388,90 @@ bool gs_hid_start(const char *name, const uint8_t mac[6])
 
 bool gs_hid_touch(const gs_esp32_touch *touch)
 {
-    uint8_t report[GS_TOUCH_REPORT_SIZE];
-    const size_t length = gs_report_touch(touch, report);
-    return gs_enqueue(GS_ITF_TOUCH, GS_REPORT_TOUCH, report, length);
+    int dropped;
+    if (!gs_accepting()) {
+        return false;
+    }
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    dropped = gs_hid_state_queue_push(&gs_touch_queue, touch);
+    xSemaphoreGive(gs_state_lock);
+    xTaskNotifyGive(gs_sender);
+    if (dropped) {
+        gs_note_drops();
+    }
+    return true;
 }
 
 bool gs_hid_keyboard(const gs_esp32_keyboard *keyboard)
 {
-    uint8_t report[GS_KEYBOARD_REPORT_SIZE];
-    const size_t length = gs_report_keyboard(keyboard, report);
-    return gs_enqueue(GS_ITF_KEYBOARD, GS_REPORT_KEYBOARD, report, length);
+    gs_usb_keyboard_report item;
+    int dropped;
+    if (!gs_accepting()) {
+        return false;
+    }
+    memset(&item, 0, sizeof(item));
+    item.report_id = GS_REPORT_KEYBOARD;
+    item.length = (uint8_t)gs_report_keyboard(keyboard, item.data);
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    dropped = gs_hid_state_queue_push(&gs_keyboard_queue, &item);
+    xSemaphoreGive(gs_state_lock);
+    xTaskNotifyGive(gs_sender);
+    if (dropped) {
+        gs_note_drops();
+    }
+    return true;
 }
 
 bool gs_hid_consumer(uint16_t usage)
 {
-    uint8_t report[GS_CONSUMER_REPORT_SIZE];
-    const size_t length = gs_report_consumer(usage, report);
-    return gs_enqueue(GS_ITF_KEYBOARD, GS_REPORT_CONSUMER, report, length);
+    gs_usb_keyboard_report item;
+    int dropped;
+    if (!gs_accepting()) {
+        return false;
+    }
+    memset(&item, 0, sizeof(item));
+    item.report_id = GS_REPORT_CONSUMER;
+    item.length = (uint8_t)gs_report_consumer(usage, item.data);
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    dropped = gs_hid_state_queue_push(&gs_keyboard_queue, &item);
+    xSemaphoreGive(gs_state_lock);
+    xTaskNotifyGive(gs_sender);
+    if (dropped) {
+        gs_note_drops();
+    }
+    return true;
 }
 
 bool gs_hid_mouse(const gs_esp32_mouse *mouse)
 {
-    uint8_t report[GS_MOUSE_REPORT_SIZE];
-    const size_t length = gs_report_mouse(mouse, report);
-    return gs_enqueue(GS_ITF_MOUSE, GS_REPORT_MOUSE, report, length);
+    int dropped;
+    if (!gs_accepting()) {
+        return false;
+    }
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    dropped = gs_hid_mouse_merge_add(&gs_mouse, mouse);
+    xSemaphoreGive(gs_state_lock);
+    xTaskNotifyGive(gs_sender);
+    if (dropped) {
+        gs_note_drops();
+    }
+    return true;
 }
 
 bool gs_hid_gamepad(const gs_esp32_gamepad *gamepad)
 {
-    uint8_t report[GS_GAMEPAD_REPORT_SIZE];
-    const size_t length = gs_report_gamepad(gamepad, report);
-    return gs_enqueue(GS_ITF_GAMEPAD, GS_REPORT_GAMEPAD, report, length);
+    int dropped;
+    if (!gs_accepting()) {
+        return false;
+    }
+    xSemaphoreTake(gs_state_lock, portMAX_DELAY);
+    dropped = gs_hid_state_queue_push(&gs_gamepad_queue, gamepad);
+    xSemaphoreGive(gs_state_lock);
+    xTaskNotifyGive(gs_sender);
+    if (dropped) {
+        gs_note_drops();
+    }
+    return true;
 }
 
 void gs_hid_phone(gs_esp32_status *status)

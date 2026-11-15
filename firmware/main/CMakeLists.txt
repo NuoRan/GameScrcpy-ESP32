@@ -6,6 +6,7 @@ set(gs_sources
     gs_board.c
     gs_download.c
     gs_hid_reports.c
+    gs_hid_sched.c
     gs_key.c
     gs_link.c
     gs_wifi.c

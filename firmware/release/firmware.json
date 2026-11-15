@@ -1,6 +1,6 @@
 {
     "format":  "gamescrcpy.esp32-firmware",
-    "version":  "1.1.0",
+    "version":  "1.1.1",
     "targets":  {
                     "esp32s3":  {
                                     "file":  "gs-esp32-esp32s3.bin",

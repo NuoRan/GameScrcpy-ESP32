@@ -102,6 +102,10 @@ Events (`events.on(topic, ({ value }) => …)`): `board.added`, `board.changed`,
 - Firmware: with ESP-IDF v6.1 installed, run `tools\build_firmware.ps1`; it builds the six chips, merges their images and updates `firmware/release/firmware.json`. See [firmware/README.md](firmware/README.md).
 - Protocol: [protocol/SPEC.md](protocol/SPEC.md). Change it in this order: SPEC → `protocol/gen_vectors.py` → `gs_esp32_protocol.h` → tests; never edit the vectors by hand.
 
+## Changes
+
+- 1.1.1: USB: touches are no longer dropped while the mouse moves quickly (the WASD keys did nothing with the camera released).
+
 ## Not done yet
 
 - Bluetooth between the computer and the board in firmware 1.1.0 has not been checked on a real board yet.
