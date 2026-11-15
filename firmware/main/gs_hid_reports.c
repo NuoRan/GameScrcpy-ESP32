@@ -15,8 +15,14 @@ static int16_t gs_axis(int16_t value)
 
 size_t gs_report_touch(const gs_esp32_touch *touch, uint8_t out[GS_TOUCH_REPORT_SIZE])
 {
-    uint8_t count = touch->count > GS_ESP32_MAX_CONTACTS ? GS_ESP32_MAX_CONTACTS : touch->count;
-    memset(out, 0, GS_TOUCH_REPORT_SIZE);
+    return gs_report_touch_most(touch, GS_ESP32_MAX_CONTACTS, out);
+}
+
+size_t gs_report_touch_most(const gs_esp32_touch *touch, uint8_t most, uint8_t *out)
+{
+    const size_t size = 1 + 6 * (size_t)most;
+    uint8_t count = touch->count > most ? most : touch->count;
+    memset(out, 0, size);
     out[0] = count;
     for (uint8_t i = 0; i < count; ++i) {
         const gs_esp32_contact *contact = &touch->contacts[i];
@@ -26,7 +32,7 @@ size_t gs_report_touch(const gs_esp32_touch *touch, uint8_t out[GS_TOUCH_REPORT_
         gs_store_u16(slot + 2, contact->x > GS_ESP32_COORD_MAX ? GS_ESP32_COORD_MAX : contact->x);
         gs_store_u16(slot + 4, contact->y > GS_ESP32_COORD_MAX ? GS_ESP32_COORD_MAX : contact->y);
     }
-    return GS_TOUCH_REPORT_SIZE;
+    return size;
 }
 
 size_t gs_report_keyboard(const gs_esp32_keyboard *keyboard, uint8_t out[GS_KEYBOARD_REPORT_SIZE])

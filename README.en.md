@@ -104,10 +104,12 @@ Events (`events.on(topic, ({ value }) => …)`): `board.added`, `board.changed`,
 
 ## Changes
 
-- 1.1.1: USB: touches are no longer dropped while the mouse moves quickly (the WASD keys did nothing with the camera released).
+- 1.1.1:
+  - USB: touches are no longer dropped while the mouse moves quickly (the WASD keys did nothing with the camera released).
+  - Bluetooth: firmware 1.1.0 and earlier never started Bluetooth on a classic ESP32, C3 or C6. The HID report descriptor for the phone was 736 bytes, more than the 512-byte limit of the NimBLE HID service, so `esp_hidd_dev_init` failed and the board advertised nothing, neither the HID device for the phone nor the serial service for the computer. Bluetooth now has its own five-finger report descriptor (506 bytes; USB keeps ten) and a report table sized for the seven reports it declares; the computer's serial service starts even when the HID device cannot; the Contact Count Maximum feature reports the real value; and mouse motion over Bluetooth is merged instead of dropped. Over Bluetooth the touch screen takes five fingers at once.
 
 ## Not done yet
 
-- Bluetooth between the computer and the board in firmware 1.1.0 has not been checked on a real board yet.
+- Bluetooth between the computer and the board has not been checked on a real board yet.
 
 The download address is added by the maintainers when they publish a release.

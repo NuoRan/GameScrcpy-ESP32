@@ -55,6 +55,9 @@
 #define GS_BLE_TIMEOUT 400
 
 void ble_store_config_init(void);
+#if GS_BLE_HID
+void gs_hid_ble_limits(void);
+#endif
 
 typedef struct {
     uint16_t handle;
@@ -461,6 +464,9 @@ static int gs_gap_event(struct ble_gap_event *event, void *argument)
                 gs_known_computer(&description.peer_id_addr)) {
                 gs_mark_computer(event->connect.conn_handle);
             }
+#if GS_BLE_HID
+            gs_hid_ble_limits();
+#endif
             gs_request_interval(event->connect.conn_handle, GS_BLE_PHONE_INTERVAL);
 #if CONFIG_BT_NIMBLE_GATT_CLIENT
             ble_gattc_exchange_mtu(event->connect.conn_handle, NULL, NULL);
