@@ -3,7 +3,7 @@ The ESP32 touch box is an ESP32 development board with the touch box firmware on
 ## Pick a board
 
 - **ESP32-S3, ESP32-S2, ESP32-P4**: plug it into the phone with a USB cable and the phone takes it for a hardware touch screen. The P4 uses high-speed USB for the least delay; it has no Wi-Fi, so it talks to this computer over the serial port only.
-- **Classic ESP32, ESP32-C3, ESP32-C6**: these cannot be a USB device, so they reach the phone over Bluetooth. Pair "GameScrcpy XXXX" once in the phone's Bluetooth settings; afterwards it reconnects by itself, a few milliseconds slower than USB.
+- **Classic ESP32, ESP32-C3, ESP32-C6**: these cannot be a USB device, so they reach the phone over Bluetooth. Pair "GameScrcpy XXXX" once in the phone's Bluetooth settings; afterwards it reconnects by itself, a few milliseconds slower than USB. Over Bluetooth the phone takes five fingers at once (USB takes ten); this needs firmware 1.1.1 or later.
 - The board needs at least 4 MB of flash; common development boards have that.
 
 ## Wiring {Two cables}

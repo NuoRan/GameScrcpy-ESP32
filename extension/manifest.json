@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "community.esp32",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "name": "ESP32 touch box",
   "description": "An ESP32 board on the phone's USB port or Bluetooth becomes its touch screen, keyboard, mouse and gamepad, so the phone can be controlled without USB debugging. The extension finds the boards, shows them on the devices page, flashes their firmware, sets up their Wi-Fi and pairs them with this computer over Bluetooth.",
   "authors": ["GameScrcpy 社区"],
