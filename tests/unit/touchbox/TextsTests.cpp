@@ -112,7 +112,8 @@ TEST_CASE("ADR-0112: the Bluetooth texts say what to do when the radio, the pair
     CHECK(failure(esp32::OpenFailure::NoKey, Language::English).find("USB") != std::string::npos);
     CHECK(failure(esp32::OpenFailure::NoAnswer, Language::English).find("1.1") != std::string::npos);
     CHECK(failure(esp32::OpenFailure::NoBluetooth, Language::Chinese) == "这台电脑没有低功耗蓝牙，或者蓝牙已关闭。");
-    CHECK(failure(esp32::OpenFailure::NotPaired, Language::English).find("Pair one") != std::string::npos);
+    CHECK(failure(esp32::OpenFailure::NotPaired, Language::English).find("Pair it again") != std::string::npos);
+    CHECK(failure(esp32::OpenFailure::NotPaired, Language::Chinese).find("忘了这台电脑") != std::string::npos);
     CHECK(gs::touchbox::openFailureText(esp32::OpenFailure::NoKey, esp32::LinkMode::Wifi, Language::English)
               .find("Wi-Fi") != std::string::npos);
 

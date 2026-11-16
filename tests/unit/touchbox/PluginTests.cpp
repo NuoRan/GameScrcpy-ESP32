@@ -637,6 +637,56 @@ TEST_CASE("ADR-0112: pairing a board seen over Bluetooth whose key this computer
     plugin->unload(plugin->context);
 }
 
+TEST_CASE("R9: pairing a board that forgot this computer drops the old Windows pairing and pairs afresh; a working "
+          "pairing is kept")
+{
+    const gs::esp32::BoardKey key = keyOf(7);
+    const std::string book = gs::esp32::writeBoards({gs::esp32::KnownBoard{
+        .id = "deadbeef0102", .name = "Desk C3", .key = key, .bluetooth = "DE:AD:BE:EF:01:04"}});
+    {
+        FakeHost fake;
+        fake.store["boards"] = book;
+        auto radio = std::make_shared<esp32test::FakeRadio>();
+        radio->add(kNearby, fakeBoard(key));
+        radio->pairElsewhere(kNearby);
+        radio->forgetOnBoard(kNearby);
+        const gs_ext_host host = fake.table();
+        const gs_ext_plugin* plugin = nullptr;
+        REQUIRE(gs::touchbox::startPlugin(&host, &plugin, quietOptions(radio)) == GS_EXT_OK);
+
+        start(*plugin, "pair", 40, R"({"device": "deadbeef0102"})");
+        REQUIRE(ended(fake, 40));
+        INFO(fake.failure(40).value_or(std::string()));
+        REQUIRE(fake.result(40).has_value());
+        CHECK(Json::parse(*fake.result(40)).at("paired") == true);
+        CHECK(radio->refused() == 1);
+        CHECK(radio->pairings() == 1);
+        CHECK(radio->opened() == 1);
+        CHECK(radio->isPaired(kNearby));
+        plugin->unload(plugin->context);
+    }
+    {
+        FakeHost fake;
+        fake.store["boards"] = book;
+        auto radio = std::make_shared<esp32test::FakeRadio>();
+        radio->add(kNearby, fakeBoard(key));
+        radio->pairElsewhere(kNearby);
+        const gs_ext_host host = fake.table();
+        const gs_ext_plugin* plugin = nullptr;
+        REQUIRE(gs::touchbox::startPlugin(&host, &plugin, quietOptions(radio)) == GS_EXT_OK);
+
+        start(*plugin, "pair", 41, R"({"device": "deadbeef0102"})");
+        REQUIRE(ended(fake, 41));
+        INFO(fake.failure(41).value_or(std::string()));
+        REQUIRE(fake.result(41).has_value());
+        CHECK(radio->refused() == 0);
+        CHECK(radio->pairings() == 0);
+        CHECK(radio->opened() == 1);
+        CHECK(radio->isPaired(kNearby));
+        plugin->unload(plugin->context);
+    }
+}
+
 TEST_CASE("ADR-0112: unpairing refuses a Bluetooth address that is not an ESP32 touch box and leaves its pairing "
           "with Windows alone")
 {

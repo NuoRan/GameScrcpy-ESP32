@@ -129,8 +129,9 @@ std::string openFailureText(esp32::OpenFailure failure, esp32::LinkMode via, Lan
                                 "这台电脑没有低功耗蓝牙，或者蓝牙已关闭。"));
     case esp32::OpenFailure::NotPaired:
         return std::string(pick(language,
-                                "No board is paired over Bluetooth yet. Pair one in the extension's settings first.",
-                                "还没有经蓝牙配对的开发板。请先在扩展的设置里配对一块。"));
+                                "No board is paired over Bluetooth, or the board has forgotten this computer. Pair it "
+                                "again in the extension's settings.",
+                                "还没有经蓝牙配对的开发板，或者开发板已经忘了这台电脑。请在扩展的设置里再配对一次。"));
     case esp32::OpenFailure::Stopped:
         break;
     }

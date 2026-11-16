@@ -266,6 +266,12 @@ public:
         m_paired.insert(address);
     }
 
+    void forgetOnBoard(std::uint64_t address)
+    {
+        const std::lock_guard lock(m_mutex);
+        m_forgotten.insert(address);
+    }
+
     [[nodiscard]] gs::esp32::BluetoothState state() override
     {
         const std::lock_guard lock(m_mutex);
@@ -308,8 +314,13 @@ public:
         if (!m_boards.contains(address)) {
             return gs::esp32::PairOutcome::NotFound;
         }
+        if (m_paired.contains(address)) {
+            return gs::esp32::PairOutcome::Paired;
+        }
         if (m_pairing == gs::esp32::PairOutcome::Paired) {
             m_paired.insert(address);
+            m_forgotten.erase(address);
+            ++m_pairings;
         }
         return m_pairing;
     }
@@ -330,6 +341,11 @@ public:
             const auto found = m_boards.find(address);
             if (found == m_boards.end()) {
                 failure = gs::esp32::BleFailure::NotFound;
+                return nullptr;
+            }
+            if (m_forgotten.contains(address)) {
+                ++m_refused;
+                failure = gs::esp32::BleFailure::NotPaired;
                 return nullptr;
             }
             board = found->second;
@@ -358,6 +374,18 @@ public:
         return m_paired.contains(address);
     }
 
+    [[nodiscard]] int pairings() const
+    {
+        const std::lock_guard lock(m_mutex);
+        return m_pairings;
+    }
+
+    [[nodiscard]] int refused() const
+    {
+        const std::lock_guard lock(m_mutex);
+        return m_refused;
+    }
+
 private:
     mutable std::mutex m_mutex;
     gs::esp32::BluetoothState m_state = gs::esp32::BluetoothState::Ready;
@@ -365,8 +393,11 @@ private:
     std::map<std::uint64_t, std::shared_ptr<FakeBleBoard>> m_boards;
     std::set<std::uint64_t> m_advertising;
     std::set<std::uint64_t> m_paired;
+    std::set<std::uint64_t> m_forgotten;
     int m_watchers = 0;
     int m_opened = 0;
+    int m_pairings = 0;
+    int m_refused = 0;
 };
 
 }
