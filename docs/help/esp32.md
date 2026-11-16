@@ -23,7 +23,7 @@ The ESP32 touch box is an ESP32 development board with the touch box firmware on
 
 ## Flash or upgrade the firmware
 
-On the board's card choose Flash firmware, or in the extension's settings pick the serial port the board is plugged into and click Flash firmware. The extension brings the firmware and the flashing tool along and usually puts the board into download mode by itself; writing takes about half a minute, and after the check the board restarts. When a new version of the extension brings newer firmware, the board's window shows that an upgrade is available.
+On the board's card choose Flash firmware, or in the extension's settings pick the serial port the board is plugged into and click Flash firmware. The extension brings the firmware and the flashing tool along and usually puts the board into download mode by itself; writing takes about half a minute, and after the check the board restarts. When a new version of the extension brings newer firmware, the board's window shows that an upgrade is available. An upgrade keeps the board's settings (Wi-Fi, name, key and Bluetooth pairings); a board that does not answer, for example one flashed with BOOT held, is written in full and has to be set up again.
 
 - **When to hold BOOT**: if it says the board did not enter download mode, hold the board's BOOT button (IO0 on some boards) while plugging in the cable (or press RST / EN once), let go of BOOT, then flash again.
 - **Old firmware**: a board that still runs the old QineTouch firmware shows "Old firmware" on its card. The old firmware only touches; keys, the mouse, the gamepad and Wi-Fi need the new one.
@@ -54,7 +54,7 @@ A board on Bluetooth shows a Bluetooth icon and its signal on its card; its wind
 - **"The board runs the old QineTouch firmware"**: only touches can be sent before the new firmware is flashed.
 - **"In use by …"**: another extension or your own logic has the serial port; the board comes back when it lets go, or when you look for boards again.
 - **"This computer has no Bluetooth LE, or Bluetooth is off"**: turn Bluetooth on in the Windows settings, or plug in a Bluetooth LE adapter.
-- **"No board is paired over Bluetooth yet"**: the connection is Bluetooth but no board is paired; pair one as described above.
+- **"No board is paired over Bluetooth, or the board has forgotten this computer"**: the connection is Bluetooth but no board is paired, or the board no longer knows this pairing (for example after flashing cleared its settings); pair it again as described above.
 - **"Plug the board into this computer by USB once and pair it from its window"**: this computer has no key for the board, or the board lost its key after its flash was erased.
 - **"Bluetooth delay is high"**: see Connect over Bluetooth.
 - Diagnose on the board's card asks the board what it is and says what is wrong; the board's window shows the answer.

@@ -36,8 +36,21 @@ constexpr int kBaudChecks = 3;
 constexpr std::size_t kSecurityInfoWithChip = 20;
 constexpr std::size_t kSecurityInfoChipAt = 12;
 constexpr std::uint32_t kDefaultFlashSize = 4U << 20U;
+constexpr std::uint32_t kSectorSize = 0x1000;
+constexpr std::uint32_t kPartitionTableAt = 0x8000;
+constexpr std::uint32_t kPartitionTableSize = 0x1000;
+constexpr std::size_t kPartitionEntrySize = 32;
+constexpr std::uint8_t kPartitionMagicLow = 0xAA;
+constexpr std::uint8_t kPartitionMagicHigh = 0x50;
+constexpr std::uint8_t kDataPartition = 0x01;
+constexpr std::uint8_t kNvsPartition = 0x02;
 
 using Report = std::function<void(FlashStage stage, std::size_t done, std::size_t total)>;
+
+struct Piece {
+    std::uint32_t at = 0;
+    std::uint32_t size = 0;
+};
 
 void sleepFor(std::chrono::milliseconds duration)
 {
@@ -77,6 +90,58 @@ std::optional<std::vector<std::uint8_t>> deflateImage(std::span<const std::uint8
     }
     out.resize(size);
     return out;
+}
+
+std::uint32_t littleWord(std::span<const std::uint8_t> bytes, std::size_t at) noexcept
+{
+    return static_cast<std::uint32_t>(bytes[at]) | (static_cast<std::uint32_t>(bytes[at + 1]) << 8U) |
+           (static_cast<std::uint32_t>(bytes[at + 2]) << 16U) | (static_cast<std::uint32_t>(bytes[at + 3]) << 24U);
+}
+
+std::vector<Piece> settingsAreas(std::span<const std::uint8_t> image)
+{
+    std::vector<Piece> areas;
+    if (image.size() < std::size_t{kPartitionTableAt} + kPartitionTableSize) {
+        return areas;
+    }
+    const std::span<const std::uint8_t> table = image.subspan(kPartitionTableAt, kPartitionTableSize);
+    for (std::size_t at = 0; at + kPartitionEntrySize <= table.size(); at += kPartitionEntrySize) {
+        if (table[at] != kPartitionMagicLow || table[at + 1] != kPartitionMagicHigh) {
+            break;
+        }
+        if (table[at + 2] != kDataPartition || table[at + 3] != kNvsPartition) {
+            continue;
+        }
+        const std::uint32_t offset = littleWord(table, at + 4);
+        const std::uint32_t size = littleWord(table, at + 8);
+        if (offset % kSectorSize != 0 || size == 0 || size % kSectorSize != 0 ||
+            offset < kPartitionTableAt + kPartitionTableSize || offset >= image.size()) {
+            continue;
+        }
+        const std::size_t end = std::min<std::size_t>(image.size(), std::size_t{offset} + size);
+        const std::span<const std::uint8_t> inside = image.subspan(offset, end - offset);
+        if (std::ranges::all_of(inside, [](std::uint8_t byte) { return byte == 0xFF; })) {
+            areas.push_back({.at = offset, .size = static_cast<std::uint32_t>(end - offset)});
+        }
+    }
+    std::ranges::sort(areas, {}, &Piece::at);
+    return areas;
+}
+
+std::vector<Piece> piecesAround(std::size_t size, const std::vector<Piece>& kept)
+{
+    std::vector<Piece> pieces;
+    std::uint32_t cursor = 0;
+    for (const Piece& area : kept) {
+        if (area.at > cursor) {
+            pieces.push_back({.at = cursor, .size = area.at - cursor});
+        }
+        cursor = std::max(cursor, area.at + area.size);
+    }
+    if (cursor < size) {
+        pieces.push_back({.at = cursor, .size = static_cast<std::uint32_t>(size - cursor)});
+    }
+    return pieces;
 }
 
 void classicReset(esp32::Port& port, const Pause& pause)
@@ -321,31 +386,73 @@ Expected<FlashResult, FlashFailure> flashFirmware(const FlashRequest& request, c
         return makeUnexpected(FlashFailure::Refused);
     }
 
-    const Expected<bool, FlashFailure> compressed = writeImage(loader, *chip, *data, image->offset, report, hooks.stop);
-    if (!compressed) {
-        return makeUnexpected(compressed.error());
+    const std::span<const std::uint8_t> all(*data);
+    std::vector<Piece> kept;
+    if (request.keepSettings && image->offset == 0) {
+        std::vector<Piece> areas = settingsAreas(all);
+        if (!areas.empty()) {
+            const std::optional<std::string> table =
+                loader.flashMd5(kPartitionTableAt, kPartitionTableSize, kMinimumLongTimeout);
+            if (table && *table == md5Hex(all.subspan(kPartitionTableAt, kPartitionTableSize))) {
+                kept = std::move(areas);
+            } else {
+                log::info(kCategory, "the board's partition table differs from the image's; its settings are rewritten");
+            }
+        }
+    }
+    const std::vector<Piece> pieces = piecesAround(all.size(), kept);
+    std::size_t toWrite = 0;
+    for (const Piece& piece : pieces) {
+        toWrite += piece.size;
+    }
+
+    bool compressed = true;
+    std::size_t written = 0;
+    for (const Piece& piece : pieces) {
+        const Report partly = [&report, &written, &toWrite, &piece](FlashStage stage, std::size_t done,
+                                                                    std::size_t total) {
+            if (stage == FlashStage::Writing && total > 0) {
+                report(stage, written + piece.size * done / total, toWrite);
+            } else {
+                report(stage, done, total);
+            }
+        };
+        const Expected<bool, FlashFailure> wrote =
+            writeImage(loader, *chip, all.subspan(piece.at, piece.size), image->offset + piece.at, partly, hooks.stop);
+        if (!wrote) {
+            return makeUnexpected(wrote.error());
+        }
+        compressed = *wrote;
+        written += piece.size;
     }
 
     report(FlashStage::Verifying, 0, 1);
-    const std::optional<std::string> digest = loader.flashMd5(image->offset, static_cast<std::uint32_t>(data->size()),
-                                                              scaled(kMd5TimeoutPerMegabyte, data->size()));
-    if (!digest) {
-        return makeUnexpected(FlashFailure::Lost);
-    }
-    if (*digest != md5Hex(*data)) {
-        log::warning(kCategory, "flash MD5 {} does not match the image", *digest);
-        return makeUnexpected(FlashFailure::VerifyFailed);
+    for (const Piece& piece : pieces) {
+        const std::optional<std::string> digest =
+            loader.flashMd5(image->offset + piece.at, piece.size, scaled(kMd5TimeoutPerMegabyte, piece.size));
+        if (!digest) {
+            return makeUnexpected(FlashFailure::Lost);
+        }
+        if (*digest != md5Hex(all.subspan(piece.at, piece.size))) {
+            log::warning(kCategory, "flash MD5 {} does not match the image at {:#x}", *digest, image->offset + piece.at);
+            return makeUnexpected(FlashFailure::VerifyFailed);
+        }
     }
 
     report(FlashStage::Restarting, 0, 1);
     if (chip->forceDownloadRegister != 0) {
         (void)loader.writeRegister(chip->forceDownloadRegister, 0, chip->forceDownloadMask);
     }
-    loader.finishFlash(*compressed, true);
+    loader.finishFlash(compressed, true);
     hardReset(port, pause);
     report(FlashStage::Done, 1, 1);
-    log::info(kCategory, "wrote firmware {} ({} bytes) to the {}", bundle->version, data->size(), chip->name);
-    return FlashResult{.chip = chip->chip, .version = bundle->version, .bytes = data->size(), .compressed = *compressed};
+    log::info(kCategory, "wrote firmware {} ({} bytes) to the {}{}", bundle->version, data->size(), chip->name,
+              kept.empty() ? "" : ", keeping its settings");
+    return FlashResult{.chip = chip->chip,
+                       .version = bundle->version,
+                       .bytes = data->size(),
+                       .compressed = compressed,
+                       .keptSettings = !kept.empty()};
 }
 
 std::string_view failureText(FlashFailure failure) noexcept

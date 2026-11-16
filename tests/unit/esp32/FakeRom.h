@@ -15,6 +15,8 @@
 #include <deque>
 #include <mutex>
 #include <optional>
+#include <span>
+#include <utility>
 #include <vector>
 
 namespace esp32test {
@@ -48,6 +50,7 @@ public:
     };
 
     static constexpr std::size_t kFlashSize = 4U << 20U;
+    static constexpr std::size_t kSector = 0x1000;
 
     explicit FakeRom(Options options)
         : m_options(options)
@@ -127,6 +130,18 @@ public:
         const std::lock_guard lock(m_mutex);
         return Bytes(m_flash.begin() + static_cast<std::ptrdiff_t>(offset),
                      m_flash.begin() + static_cast<std::ptrdiff_t>(offset + size));
+    }
+
+    void preload(std::size_t offset, std::span<const std::uint8_t> bytes)
+    {
+        const std::lock_guard lock(m_mutex);
+        std::ranges::copy(bytes, m_flash.begin() + static_cast<std::ptrdiff_t>(offset));
+    }
+
+    [[nodiscard]] std::vector<std::pair<std::uint32_t, std::uint32_t>> digests() const
+    {
+        const std::lock_guard lock(m_mutex);
+        return m_digests;
     }
 
     [[nodiscard]] std::vector<std::uint8_t> commands() const
@@ -341,6 +356,13 @@ private:
             for (std::size_t i = 0; i < data.size() / 4; ++i) {
                 started.words.push_back(word(data, i));
             }
+            const std::size_t from = started.words[3] / kSector * kSector;
+            const std::size_t end = static_cast<std::size_t>(started.words[3]) + started.words[0];
+            const std::size_t to = std::min(m_flash.size(), (end + kSector - 1) / kSector * kSector);
+            if (from < to) {
+                std::fill(m_flash.begin() + static_cast<std::ptrdiff_t>(from),
+                          m_flash.begin() + static_cast<std::ptrdiff_t>(to), std::uint8_t{0xFF});
+            }
             m_begin = started;
             m_compressed.clear();
             m_nextSequence = 0;
@@ -401,6 +423,7 @@ private:
             }
             const std::uint32_t offset = word(data, 0);
             const std::uint32_t length = word(data, 1);
+            m_digests.emplace_back(offset, length);
             if (m_options.corruptFlash) {
                 m_flash[offset + length / 2] = static_cast<std::uint8_t>(m_flash[offset + length / 2] ^ 0x01U);
             }
@@ -424,6 +447,7 @@ private:
     std::vector<std::uint8_t> m_commands;
     std::vector<RegisterWrite> m_registerWrites;
     std::vector<LineChange> m_lines;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> m_digests;
     std::optional<FlashBegin> m_begin;
     std::optional<std::uint32_t> m_endFlag;
     std::uint32_t m_nextSequence = 0;

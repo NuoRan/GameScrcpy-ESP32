@@ -295,11 +295,13 @@ void Extension::runFlash(std::uint64_t job, const std::string& device, const std
     const std::string owner = "flash:" + std::to_string(job);
     m_host.progress(job, 0.02, flashStageText(espflash::FlashStage::Preparing, m_language));
     bool viaFirmware = false;
+    bool answered = false;
     std::string resource;
     if (board && board->connected && !board->held) {
         Taken taken = m_fleet->take(board->id, owner, Holder::Flash);
         if (taken.link != nullptr && taken.link->state() == esp32::LinkState::Ready) {
             const std::optional<esp32::BoardInfo> info = taken.link->board();
+            answered = info.has_value();
             viaFirmware = info && info->chipId != GS_ESP32_CHIP_ESP32 && taken.link->enterDownload();
         }
         taken.link.reset();
@@ -321,6 +323,7 @@ void Extension::runFlash(std::uint64_t job, const std::string& device, const std
     request.usbSerialJtag = facts.usbSerialJtag;
     request.enter = viaFirmware ? espflash::EnterMode::Firmware : espflash::EnterMode::Auto;
     request.firmwareFolder = m_firmwareFolder;
+    request.keepSettings = answered;
     espflash::FlashHooks hooks;
     hooks.stop = stop;
     double reached = 0.0;
@@ -351,21 +354,29 @@ void Extension::runFlash(std::uint64_t job, const std::string& device, const std
         return;
     }
     const std::string chip(espflash::chipInfo(result->chip).name);
-    const std::string text = arg(pick(m_language, "Firmware %1 is on the %2. The board restarted.",
-                                      "%2 已写入固件 %1，开发板已重启。"),
-                                 result->version, chip);
-    log::info(kCategory, "wrote firmware {} to the {} on {}", result->version, chip, port);
+    std::string text = arg(pick(m_language, "Firmware %1 is on the %2. The board restarted.",
+                                "%2 已写入固件 %1，开发板已重启。"),
+                           result->version, chip);
+    if (answered && !result->keptSettings) {
+        text += pick(m_language,
+                     " Its earlier settings could not be kept; set up Wi-Fi and Bluetooth again if you used them.",
+                     "开发板原来的设置没能保留；用过 Wi-Fi 或蓝牙的话，请重新设置。");
+    }
+    log::info(kCategory, "wrote firmware {} to the {} on {}{}", result->version, chip, port,
+              result->keptSettings ? ", keeping its settings" : "");
     emit("flash.done", compact(Json{{"device", device},
                                     {"port", port},
                                     {"ok", true},
                                     {"text", text},
                                     {"version", result->version},
-                                    {"chip", chip}}));
+                                    {"chip", chip},
+                                    {"keptSettings", result->keptSettings}}));
     m_host.finish(job, compact(Json{{"port", port},
                                     {"chip", chip},
                                     {"version", result->version},
                                     {"bytes", result->bytes},
                                     {"compressed", result->compressed},
+                                    {"keptSettings", result->keptSettings},
                                     {"text", text}}));
 }
 
@@ -755,6 +766,7 @@ void Extension::runPair(std::uint64_t job, const std::string& device, const std:
         name = book->name.empty() ? spotted->name : book->name;
     }
     m_host.progress(job, 0.55, pick(m_language, "Pairing with Windows…", "正在与 Windows 配对…"));
+    const bool pairedBefore = m_radio->paired(*address);
     const esp32::PairOutcome paired = m_radio->pair(*address);
     if (paired != esp32::PairOutcome::Paired) {
         failed(pairFailureText(paired, m_language));
@@ -773,6 +785,15 @@ void Extension::runPair(std::uint64_t job, const std::string& device, const std:
     settings.link = esp32::LinkMode::Bluetooth;
     settings.address = addressText;
     Expected<esp32::OpenedLink, esp32::OpenFailure> opened = esp32::openBoard(settings, {}, stop);
+    if (!opened && pairedBefore && !stop.stop_requested() &&
+        (opened.error() == esp32::OpenFailure::NotPaired || opened.error() == esp32::OpenFailure::NoBoard ||
+         opened.error() == esp32::OpenFailure::NoAnswer)) {
+        log::info(kCategory, "the earlier Windows pairing with {} does not work; pairing again", addressText);
+        m_host.progress(job, 0.85, pick(m_language, "Pairing with Windows again…", "正在重新与 Windows 配对…"));
+        if (m_radio->unpair(*address) && m_radio->pair(*address) == esp32::PairOutcome::Paired) {
+            opened = esp32::openBoard(settings, {}, stop);
+        }
+    }
     if (opened) {
         opened->link.reset();
     }

@@ -44,6 +44,7 @@ struct FlashRequest {
     EnterMode enter = EnterMode::Auto;
     std::filesystem::path firmwareFolder;
     std::uint32_t fastBaud = 460800;
+    bool keepSettings = false;
 };
 
 struct FlashResult {
@@ -51,6 +52,7 @@ struct FlashResult {
     std::string version;
     std::size_t bytes = 0;
     bool compressed = true;
+    bool keptSettings = false;
 };
 
 using FlashProgress = std::function<void(FlashStage stage, std::size_t done, std::size_t total)>;

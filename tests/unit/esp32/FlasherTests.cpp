@@ -9,8 +9,11 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using esp32test::Bytes;
@@ -85,9 +88,12 @@ struct Bench {
     {
         return gs::espflash::flashFirmware(
             request,
-            [this](FlashStage stage, std::size_t, std::size_t) {
+            [this](FlashStage stage, std::size_t done, std::size_t total) {
                 if (stages.empty() || stages.back() != stage) {
                     stages.push_back(stage);
+                }
+                if (stage == FlashStage::Writing && total > 0) {
+                    writing.push_back(static_cast<double>(done) / static_cast<double>(total));
                 }
             },
             hooks);
@@ -99,6 +105,7 @@ struct Bench {
     std::vector<std::uint32_t> bauds;
     std::vector<std::chrono::milliseconds> pauses;
     std::vector<FlashStage> stages;
+    std::vector<double> writing;
     int failuresLeft = 0;
     SerialFailure failureKind = SerialFailure::NotFound;
 };
@@ -108,6 +115,125 @@ std::uint32_t roundedUp(std::size_t size)
     return static_cast<std::uint32_t>((size + rom::kBlockSize - 1) / rom::kBlockSize * rom::kBlockSize);
 }
 
+constexpr std::uint32_t kTableAt = 0x8000;
+constexpr std::uint32_t kNvsAt = 0x9000;
+constexpr std::uint32_t kAppAt = 0x10000;
+
+Bytes partitionTable(std::uint32_t nvsSize)
+{
+    Bytes table(0x1000, 0xFF);
+    const auto entry = [&table](std::size_t index, std::uint8_t type, std::uint8_t subtype, std::uint32_t offset,
+                                std::uint32_t size, std::string_view label) {
+        const std::size_t at = index * 32;
+        table[at] = 0xAA;
+        table[at + 1] = 0x50;
+        table[at + 2] = type;
+        table[at + 3] = subtype;
+        for (std::size_t i = 0; i < 4; ++i) {
+            table[at + 4 + i] = static_cast<std::uint8_t>(offset >> (8U * i));
+            table[at + 8 + i] = static_cast<std::uint8_t>(size >> (8U * i));
+        }
+        std::fill_n(table.begin() + static_cast<std::ptrdiff_t>(at + 12), 20, std::uint8_t{0});
+        std::ranges::copy(label, table.begin() + static_cast<std::ptrdiff_t>(at + 12));
+    };
+    entry(0, 0x01, 0x02, kNvsAt, nvsSize, "nvs");
+    entry(1, 0x01, 0x01, kNvsAt + nvsSize, 0x1000, "phy_init");
+    entry(2, 0x00, 0x00, kAppAt, 0x177000, "factory");
+    return table;
+}
+
+Bytes mergedImage(const Bytes& table, std::size_t appSize, std::uint32_t seed)
+{
+    Bytes image(kAppAt + appSize, 0xFF);
+    const Bytes boot = makeImage(0x5000, seed);
+    std::ranges::copy(boot, image.begin());
+    std::ranges::copy(table, image.begin() + static_cast<std::ptrdiff_t>(kTableAt));
+    const Bytes app = makeImage(appSize, seed + 1);
+    std::ranges::copy(app, image.begin() + static_cast<std::ptrdiff_t>(kAppAt));
+    return image;
+}
+
+Bytes slice(const Bytes& bytes, std::size_t from, std::size_t to)
+{
+    return Bytes(bytes.begin() + static_cast<std::ptrdiff_t>(from), bytes.begin() + static_cast<std::ptrdiff_t>(to));
+}
+
+}
+
+TEST_CASE("R9: upgrading a board that answers keeps its settings partition when its partition table matches the image's")
+{
+    const Bytes table = partitionTable(0x6000);
+    const Bytes image = mergedImage(table, 30000, 21);
+    TemporaryFolder folder;
+    folder.write("gs-esp32-esp32s3.bin", image);
+    folder.write("firmware.json", manifestFor({{"esp32s3", "gs-esp32-esp32s3.bin", image, 9}}));
+    Bench bench({.chip = Chip::Esp32S3});
+    bench.rom.preload(0, mergedImage(table, 26000, 31));
+    const Bytes settings = makeImage(0x6000, 41);
+    bench.rom.preload(kNvsAt, settings);
+
+    const auto result = bench.flash(
+        {.port = "COM7", .kind = PortKind::Ch34x, .firmwareFolder = folder.path(), .keepSettings = true});
+    REQUIRE(result.has_value());
+    CHECK(result->keptSettings);
+    CHECK(result->bytes == image.size());
+    CHECK(bench.rom.flash(kNvsAt, 0x6000) == settings);
+    CHECK(bench.rom.flash(0, kNvsAt) == slice(image, 0, kNvsAt));
+    CHECK(bench.rom.flash(0xF000, image.size() - 0xF000) == slice(image, 0xF000, image.size()));
+    using Range = std::pair<std::uint32_t, std::uint32_t>;
+    CHECK(bench.rom.digests() == std::vector<Range>{Range{kTableAt, 0x1000}, Range{0, kNvsAt},
+                                                    Range{0xF000, static_cast<std::uint32_t>(image.size() - 0xF000)}});
+    REQUIRE_FALSE(bench.writing.empty());
+    CHECK(std::ranges::is_sorted(bench.writing));
+    CHECK(bench.writing.back() == doctest::Approx(1.0));
+}
+
+TEST_CASE("R9: a board with another partition table, a board that did not answer and an image that fills the "
+          "settings partition all get the whole image")
+{
+    const Bytes table = partitionTable(0x6000);
+    const Bytes image = mergedImage(table, 30000, 22);
+    const Bytes settings = makeImage(0x6000, 42);
+    TemporaryFolder folder;
+    folder.write("gs-esp32-esp32s3.bin", image);
+    folder.write("firmware.json", manifestFor({{"esp32s3", "gs-esp32-esp32s3.bin", image, 9}}));
+    {
+        Bench bench({});
+        bench.rom.preload(0, mergedImage(partitionTable(0x5000), 26000, 32));
+        bench.rom.preload(kNvsAt, settings);
+        const auto result = bench.flash(
+            {.port = "COM4", .kind = PortKind::Ch34x, .firmwareFolder = folder.path(), .keepSettings = true});
+        REQUIRE(result.has_value());
+        CHECK_FALSE(result->keptSettings);
+        CHECK(bench.rom.flash(0, image.size()) == image);
+        CHECK(bench.rom.count(rom::kSpiFlashMd5) == 2);
+    }
+    {
+        Bench bench({});
+        bench.rom.preload(0, mergedImage(table, 26000, 33));
+        bench.rom.preload(kNvsAt, settings);
+        const auto result = bench.flash({.port = "COM4", .kind = PortKind::Ch34x, .firmwareFolder = folder.path()});
+        REQUIRE(result.has_value());
+        CHECK_FALSE(result->keptSettings);
+        CHECK(bench.rom.flash(0, image.size()) == image);
+        CHECK(bench.rom.count(rom::kSpiFlashMd5) == 1);
+    }
+    {
+        Bytes filled = image;
+        filled[kNvsAt + 16] = 0x00;
+        TemporaryFolder other;
+        other.write("gs-esp32-esp32s3.bin", filled);
+        other.write("firmware.json", manifestFor({{"esp32s3", "gs-esp32-esp32s3.bin", filled, 9}}));
+        Bench bench({});
+        bench.rom.preload(0, mergedImage(table, 26000, 34));
+        bench.rom.preload(kNvsAt, settings);
+        const auto result = bench.flash(
+            {.port = "COM4", .kind = PortKind::Ch34x, .firmwareFolder = other.path(), .keepSettings = true});
+        REQUIRE(result.has_value());
+        CHECK_FALSE(result->keptSettings);
+        CHECK(bench.rom.flash(0, filled.size()) == filled);
+        CHECK(bench.rom.count(rom::kSpiFlashMd5) == 1);
+    }
 }
 
 TEST_CASE("the flasher writes an ESP32-S3 image compressed, checks it with MD5 and restarts the board (HID-004)")
