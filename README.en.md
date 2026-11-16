@@ -109,9 +109,10 @@ Events (`events.on(topic, ({ value }) => …)`): `board.added`, `board.changed`,
   - Bluetooth: firmware 1.1.0 and earlier never started Bluetooth on a classic ESP32, C3 or C6. The HID report descriptor for the phone was 743 bytes, more than the 512-byte limit of the NimBLE HID service, so `esp_hidd_dev_init` failed and the board advertised nothing, neither the HID device for the phone nor the serial service for the computer. Bluetooth now has its own five-finger report descriptor (503 bytes; USB keeps ten) and a report table sized for the seven reports it declares; the computer's serial service starts even when the HID device cannot; the Contact Count Maximum feature reports the real value; and mouse motion over Bluetooth is merged instead of dropped. Over Bluetooth the touch screen takes five fingers at once.
   - Flashing: when the board runs this firmware and its partition table matches the new image, an upgrade keeps the board's settings (Wi-Fi, name, key and Bluetooth pairings) instead of clearing them; a board that does not answer is still written in full.
   - Pairing: when Windows still holds an old pairing that the board has forgotten (for example after flashing cleared its settings), Pair over Bluetooth removes the old pairing and pairs again instead of failing with "not paired" every time.
+  - The computer's Bluetooth link: it never connected to a real board (Windows, asked to look up a service by its 128-bit UUID without its cache, always answered "the device does not recognize the command"). The extension now lists all services without the cache and picks the serial service from them. Checked on an ESP32-S3: pairing, connecting over Bluetooth, an upgrade from the extension that needs no new pairing, and pairing again after the board's settings were erased.
 
 ## Not done yet
 
-- Bluetooth between the computer and the board has not been checked on a real board yet.
+- The computer's Bluetooth and the phone's Bluetooth HID have not been checked on a real classic ESP32, C3 or C6 yet.
 
 The download address is added by the maintainers when they publish a release.

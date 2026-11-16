@@ -175,8 +175,15 @@ struct Link {
     winrt::event_token sizeToken{};
     std::atomic<std::size_t> chunk{kSmallestChunk};
     std::atomic<bool> ended{false};
+    std::string_view step = "finding the board";
     BleChannelEvents events;
 };
+
+BleFailure failed(const Link& link, gatt::GattCommunicationStatus status)
+{
+    log::warning(kCategory, "connecting over Bluetooth, {}: status {}", link.step, static_cast<int>(status));
+    return failureOf(status);
+}
 
 void closeLink(Link& link)
 {
@@ -214,10 +221,12 @@ void closeLink(Link& link)
 
 BleFailure connectLink(Link& link, std::uint64_t address, const std::weak_ptr<Link>& weak)
 {
+    link.step = "finding the board";
     link.device = bluetooth::BluetoothLEDevice::FromBluetoothAddressAsync(address).get();
     if (!link.device) {
         return BleFailure::NotFound;
     }
+    link.step = "opening a session";
     link.session = gatt::GattSession::FromDeviceIdAsync(link.device.BluetoothDeviceId()).get();
     if (link.session) {
         link.session.MaintainConnection(true);
@@ -234,25 +243,33 @@ BleFailure connectLink(Link& link, std::uint64_t address, const std::weak_ptr<Li
             }
         });
     }
+    link.step = "looking up the serial service";
     const gatt::GattDeviceServicesResult services =
-        link.device.GetGattServicesForUuidAsync(guidOf(kSerialService), bluetooth::BluetoothCacheMode::Uncached).get();
+        link.device.GetGattServicesAsync(bluetooth::BluetoothCacheMode::Uncached).get();
     if (services.Status() != gatt::GattCommunicationStatus::Success) {
-        return failureOf(services.Status());
+        return failed(link, services.Status());
     }
-    if (services.Services().Size() == 0) {
+    const winrt::guid serial = guidOf(kSerialService);
+    for (const gatt::GattDeviceService& each : services.Services()) {
+        if (each.Uuid() == serial) {
+            link.service = each;
+            break;
+        }
+    }
+    if (!link.service) {
         return BleFailure::NoService;
     }
-    link.service = services.Services().GetAt(0);
+    link.step = "looking up its characteristics";
     const gatt::GattCharacteristicsResult receive =
         link.service.GetCharacteristicsForUuidAsync(guidOf(kSerialReceive), bluetooth::BluetoothCacheMode::Uncached)
             .get();
     const gatt::GattCharacteristicsResult send =
         link.service.GetCharacteristicsForUuidAsync(guidOf(kSerialSend), bluetooth::BluetoothCacheMode::Uncached).get();
     if (receive.Status() != gatt::GattCommunicationStatus::Success) {
-        return failureOf(receive.Status());
+        return failed(link, receive.Status());
     }
     if (send.Status() != gatt::GattCommunicationStatus::Success) {
-        return failureOf(send.Status());
+        return failed(link, send.Status());
     }
     if (receive.Characteristics().Size() == 0 || send.Characteristics().Size() == 0) {
         return BleFailure::NoService;
@@ -272,11 +289,13 @@ BleFailure connectLink(Link& link, std::uint64_t address, const std::weak_ptr<Li
                 return;
             }
         });
+    link.step = "subscribing to the board's messages";
     const gatt::GattCommunicationStatus subscribed = link.send.WriteClientCharacteristicConfigurationDescriptorAsync(
         gatt::GattClientCharacteristicConfigurationDescriptorValue::Notify).get();
     if (subscribed != gatt::GattCommunicationStatus::Success) {
-        return failureOf(subscribed);
+        return failed(link, subscribed);
     }
+    link.step = "watching the connection";
     link.statusToken = link.device.ConnectionStatusChanged(
         [weak](const bluetooth::BluetoothLEDevice& sender, const IInspectable&) {
             try {
@@ -648,7 +667,8 @@ public:
             try {
                 return connectLink(*link, address, std::weak_ptr<Link>(link));
             } catch (const winrt::hresult_error& error) {
-                log::warning(kCategory, "connecting over Bluetooth: {}", messageOf(error));
+                log::warning(kCategory, "connecting over Bluetooth, {}: {} ({:#010x})", link->step, messageOf(error),
+                             static_cast<std::uint32_t>(error.code().value));
                 return BleFailure::Unreachable;
             }
         });
