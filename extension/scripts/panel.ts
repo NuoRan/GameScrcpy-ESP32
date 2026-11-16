@@ -159,7 +159,7 @@ const english = {
     inUse: "Connected",
     busyElsewhere: "In use",
     notNearby: "Not nearby",
-    pairedDone: "Paired. Choose Bluetooth as the ESP32 connection in the phone's settings of this extension.",
+    pairedDone: "Paired. Choose Bluetooth as the ESP32 connection in the extension's settings or in a phone's settings.",
     unpaired: "The pairing is forgotten.",
     viaBluetooth: "Bluetooth",
     slowTrip: "Slowest 1 in 100",
@@ -226,7 +226,7 @@ const chinese: typeof english = {
     inUse: "已连接",
     busyElsewhere: "使用中",
     notNearby: "不在附近",
-    pairedDone: "已配对。在这台手机的扩展设置里把 ESP32 连接方式选为蓝牙。",
+    pairedDone: "已配对。在扩展的设置（或某台手机的设置）里把 ESP32 连接方式选为蓝牙。",
     unpaired: "已忘记配对。",
     viaBluetooth: "蓝牙",
     slowTrip: "最慢的百分之一",
@@ -905,6 +905,13 @@ events.on(
             text: textIn(fields, "text"),
             failed: !ok,
         };
+        if (ok) {
+            tapNote = null;
+            wifiNote = null;
+            renameNote = null;
+            pairNote = null;
+            diagnosis = null;
+        }
         renderAll();
     },
     { again: "queue" },
