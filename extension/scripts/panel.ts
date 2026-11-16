@@ -103,7 +103,6 @@ type Esp32 = {
 const esp32 = (): Esp32 => ext.community.esp32 as Esp32;
 
 const english = {
-    intro: "Plug the board's serial port into this computer, or set up its Wi-Fi once. Each phone picks the board in its own settings of this extension.",
     boards: "Boards",
     noBoards: "No ESP32 touch box was found yet.",
     rescan: "Look again",
@@ -114,7 +113,6 @@ const english = {
     noPorts: "No serial port found. Plug the board's serial port into this computer.",
     flash: "Flash firmware",
     upgrade: "Upgrade firmware",
-    bootHint: "If it says the board did not enter download mode: hold BOOT while plugging in the cable, then flash again.",
     flashSerialOnly: "Firmware is flashed over the serial port: connect the board with its cable first.",
     flashSteps: ["Prepare", "Download mode", "Write", "Check", "Restart"],
     chip: "Chip",
@@ -134,7 +132,6 @@ const english = {
     disconnect: "Disconnect",
     gone: "This board is not connected any more. Plug it in again, or look for boards again on the Extensions page.",
     wifiGroup: "Wi-Fi",
-    wifiIntro: "The board joins this network and can then be reached without the cable. Only this computer gets the key that lets it talk to the board.",
     wifiSerialOnly: "Wi-Fi is set over the serial port: connect the board with its cable first.",
     wifiMissing: "This board has no Wi-Fi.",
     ssid: "Network name",
@@ -151,10 +148,8 @@ const english = {
     diagnose: "Diagnose",
     healthy: "The board answers and works.",
     bluetoothGroup: "Bluetooth",
-    bluetoothIntro:
-        "With firmware 1.1 or later, a classic ESP32, C3, C6 or S3 board can reach this computer over Bluetooth instead of the cable. Pair it once from its page while it is plugged in by USB, or below when this computer already has its key.",
     lookForBoards: "Look for boards",
-    noneNearby: "No board was found nearby. Keep the board on and near this computer, then look again.",
+    noneNearby: "No board was found nearby.",
     needsKey: "A board marked No key has not met this computer yet: plug it in by USB and pair it from its page.",
     pair: "Pair",
     forgetPairing: "Forget pairing",
@@ -168,16 +163,13 @@ const english = {
     unpaired: "The pairing is forgotten.",
     viaBluetooth: "Bluetooth",
     slowTrip: "Slowest 1 in 100",
-    pairIntro: "Pair this board with this computer over Bluetooth so the phone can use it without the cable. It gets its key over the cable first.",
     pairBoard: "Pair over Bluetooth",
-    bluetoothLinked: "This board reaches this computer over Bluetooth.",
     noBluetoothLink: "This firmware cannot reach a computer over Bluetooth. Flash firmware 1.1 or later; the ESP32-S2 has no Bluetooth.",
-    pairSerialOnly: "Pairing starts over the serial port: connect the board with its cable first, or pair it from the boards found over Bluetooth on the Extensions page.",
-    help: "Wiring, flashing and the messages are explained in the help article ESP32 touch box.",
+    pairSerialOnly: "Pairing starts over the serial port: connect the board with its cable first.",
+    help: "Wiring, flashing, Wi-Fi and Bluetooth are explained in the help article ESP32 touch box.",
 };
 
 const chinese: typeof english = {
-    intro: "把开发板的串口接到这台电脑，或者先给它设置一次 Wi-Fi。每台手机在这个扩展的手机设置里选用哪块开发板。",
     boards: "开发板",
     noBoards: "还没有找到 ESP32 触控盒。",
     rescan: "重新查找",
@@ -188,7 +180,6 @@ const chinese: typeof english = {
     noPorts: "没有找到串口。把开发板的串口接到这台电脑。",
     flash: "刷写固件",
     upgrade: "升级固件",
-    bootHint: "如果提示开发板没有进入下载模式：按住 BOOT 再插上数据线，然后重新刷写。",
     flashSerialOnly: "固件要经串口刷写：请先用数据线连上开发板。",
     flashSteps: ["准备", "下载模式", "写入", "校验", "重启"],
     chip: "芯片",
@@ -208,7 +199,6 @@ const chinese: typeof english = {
     disconnect: "断开",
     gone: "这块开发板已经断开。重新插上，或者在扩展页重新查找开发板。",
     wifiGroup: "Wi-Fi",
-    wifiIntro: "开发板会加入这个网络，之后不接数据线也能连接。只有这台电脑拿到与开发板通信的密钥。",
     wifiSerialOnly: "Wi-Fi 要经串口设置：请先用数据线连上开发板。",
     wifiMissing: "这块开发板没有 Wi-Fi。",
     ssid: "网络名称",
@@ -225,10 +215,8 @@ const chinese: typeof english = {
     diagnose: "诊断",
     healthy: "开发板有应答，工作正常。",
     bluetoothGroup: "蓝牙",
-    bluetoothIntro:
-        "装了 1.1 或更新固件的经典 ESP32、C3、C6、S3 开发板可以经蓝牙连这台电脑，不用数据线。开发板经 USB 接着时在它的页面配对一次；这台电脑已有它的密钥时也可以在下面配对。",
     lookForBoards: "查找开发板",
-    noneNearby: "附近没有找到开发板。让开发板保持通电、靠近这台电脑，再找一次。",
+    noneNearby: "附近没有找到开发板。",
     needsKey: "标着“没有密钥”的开发板还没见过这台电脑：先经 USB 接上，在它的页面配对。",
     pair: "配对",
     forgetPairing: "忘记配对",
@@ -242,12 +230,10 @@ const chinese: typeof english = {
     unpaired: "已忘记配对。",
     viaBluetooth: "蓝牙",
     slowTrip: "最慢的百分之一",
-    pairIntro: "让这块开发板经蓝牙与这台电脑配对，手机就能不接数据线使用它。开发板会先经数据线拿到密钥。",
     pairBoard: "经蓝牙配对",
-    bluetoothLinked: "这块开发板经蓝牙连着这台电脑。",
     noBluetoothLink: "这个固件还不能经蓝牙连电脑。请刷入 1.1 或更新的固件；ESP32-S2 没有蓝牙。",
-    pairSerialOnly: "配对要从串口开始：请先用数据线连上开发板，或者在扩展页从经蓝牙找到的开发板里配对。",
-    help: "接线、刷写与各种提示的意思见帮助文章“ESP32 触控盒”。",
+    pairSerialOnly: "配对要从串口开始：请先用数据线连上开发板。",
+    help: "接线、刷写、Wi-Fi 与蓝牙见帮助文章“ESP32 触控盒”。",
 };
 
 const say = safely(() => esp32().language(), "en") === "zh_CN" ? chinese : english;
@@ -391,7 +377,7 @@ function nearbyText(board: NearbyBoard): string {
 
 function bluetoothNodes(): UiNode[] {
     const radio = radioNow();
-    const nodes: UiNode[] = [{ type: "text", text: say.bluetoothIntro, style: "caption", tone: "muted" }];
+    const nodes: UiNode[] = [];
     if (radio.state === "missing" || radio.state === "off") {
         nodes.push({ type: "text", text: radio.stateText, tone: "warn" });
         nodes.push(...noteNode(bluetoothNote));
@@ -508,11 +494,9 @@ function renderMain(): void {
         ],
     });
     firmwareNodes.push(...flashNodes(true));
-    firmwareNodes.push({ type: "text", text: say.bootHint, style: "caption", tone: "muted" });
     main.render({
         type: "column",
         children: [
-            { type: "text", text: say.intro, style: "caption", tone: "muted" },
             { type: "group", title: say.boards, children: boardNodes },
             { type: "group", title: say.bluetoothGroup, children: bluetoothNodes() },
             { type: "group", title: say.firmware, children: firmwareNodes },
@@ -542,7 +526,6 @@ function whereText(board: Board): string {
 function bluetoothSheetNodes(board: Board, usable: boolean): UiNode[] {
     const nodes: UiNode[] = [];
     if (board.bluetooth) {
-        nodes.push({ type: "text", text: say.bluetoothLinked, style: "caption", tone: "muted" });
         nodes.push({
             type: "row",
             children: [{ type: "button", id: "unpair", title: say.forgetPairing, style: "danger", enabled: !pairing.running }],
@@ -552,7 +535,6 @@ function bluetoothSheetNodes(board: Board, usable: boolean): UiNode[] {
     } else if (board.legacy || (board.chip !== null && !board.hasBluetoothLink)) {
         nodes.push({ type: "text", text: say.noBluetoothLink, style: "caption", tone: "muted" });
     } else {
-        nodes.push({ type: "text", text: say.pairIntro, style: "caption", tone: "muted" });
         nodes.push({
             type: "row",
             children: [
@@ -647,7 +629,6 @@ function renderBoard(): void {
     } else if (!board.hasWifi) {
         wifiChildren.push({ type: "text", text: board.legacy ? say.wifiSerialOnly : say.wifiMissing, style: "caption", tone: "muted" });
     } else {
-        wifiChildren.push({ type: "text", text: say.wifiIntro, style: "caption", tone: "muted" });
         wifiChildren.push({ type: "field", id: "ssid", title: say.ssid, value: ssid, enabled: usable });
         wifiChildren.push({ type: "field", id: "password", title: say.password, value: password, enabled: usable });
         const buttons: UiNode[] = [{ type: "button", id: "wifiSave", title: say.saveWifi, style: "primary", enabled: usable }];
