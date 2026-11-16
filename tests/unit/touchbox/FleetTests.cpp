@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -57,11 +59,23 @@ std::vector<std::string> placesOf(const std::vector<Candidate>& candidates)
 class BoardPlug final : public esp32::Port
 {
 public:
-    BoardPlug(std::shared_ptr<FakeBoard> board, std::shared_ptr<std::atomic<bool>> unplugged)
+    BoardPlug(std::shared_ptr<FakeBoard> board, std::shared_ptr<std::atomic<bool>> unplugged,
+              std::function<void()> closing = {})
         : m_board(std::move(board))
         , m_unplugged(std::move(unplugged))
+        , m_closing(std::move(closing))
     {
     }
+
+    ~BoardPlug() override
+    {
+        if (m_closing) {
+            m_closing();
+        }
+    }
+
+    BoardPlug(const BoardPlug&) = delete;
+    BoardPlug& operator=(const BoardPlug&) = delete;
 
     [[nodiscard]] bool write(std::span<const std::uint8_t> bytes) override
     {
@@ -96,12 +110,19 @@ public:
 private:
     std::shared_ptr<FakeBoard> m_board;
     std::shared_ptr<std::atomic<bool>> m_unplugged;
+    std::function<void()> m_closing;
     std::atomic<bool> m_interrupted{false};
 };
 
 class Bench
 {
 public:
+    void onClosing(std::function<void(const std::string& where)> closing)
+    {
+        const std::scoped_lock lock(m_mutex);
+        m_closing = std::move(closing);
+    }
+
     void plug(const std::string& name, esp32::PortKind kind, bool answers)
     {
         const std::scoped_lock lock(m_mutex);
@@ -178,12 +199,16 @@ public:
                              const std::stop_token& stop, esp32::BoardTrouble& trouble) -> Probed {
             std::shared_ptr<FakeBoard> fake;
             std::shared_ptr<std::atomic<bool>> unplugged;
+            std::function<void()> closing;
             {
                 const std::scoped_lock lock(m_mutex);
                 m_probed.push_back(candidate.where);
                 if (const auto found = m_boards.find(candidate.where); found != m_boards.end()) {
                     fake = found->second;
                     unplugged = m_plugs[candidate.where];
+                }
+                if (m_closing) {
+                    closing = [closed = m_closing, where = candidate.where] { closed(where); };
                 }
             }
             if (fake == nullptr) {
@@ -192,8 +217,8 @@ public:
             }
             esp32::LinkOptions options;
             options.allowLegacy = false;
-            auto link = std::make_unique<esp32::Esp32Link>(std::make_unique<BoardPlug>(fake, unplugged), options,
-                                                           std::move(events));
+            auto link = std::make_unique<esp32::Esp32Link>(
+                std::make_unique<BoardPlug>(fake, unplugged, std::move(closing)), options, std::move(events));
             esp32::LinkState state = link->state();
             const auto deadline = std::chrono::steady_clock::now() + 3s;
             while (state == esp32::LinkState::Opening && !stop.stop_requested() &&
@@ -230,6 +255,7 @@ private:
     std::vector<std::string> m_probed;
     std::set<std::string> m_refused;
     std::set<std::string> m_held;
+    std::function<void(const std::string&)> m_closing;
 };
 
 void lookFor(Fleet& fleet, const esp32::Esp32Settings& settings)
@@ -567,6 +593,50 @@ TEST_CASE("ADR-0112: changing the settings starts over and turning the fleet off
     REQUIRE(idle(fleet));
     CHECK(bench.probesOf("COM7") == before);
     CHECK(eventually([&bench] { return bench.held().empty(); }));
+}
+
+TEST_CASE("R9: changing the settings closes the old board's port before the new search claims anything, so a port "
+          "that is slow to close cannot make that claim wait out its time")
+{
+    Bench bench;
+    bench.plug("COM7", esp32::PortKind::EspressifUsb, true);
+    bench.plug("COM8", esp32::PortKind::EspressifUsb, true);
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::vector<std::string> order;
+    const auto seen = [&order](const std::string& event) { return std::ranges::find(order, event) != order.end(); };
+    bench.onClosing([&](const std::string& where) {
+        std::unique_lock lock(mutex);
+        if (where == "COM7") {
+            changed.wait_for(lock, 300ms, [&seen] { return seen("claim serial:COM8"); });
+        }
+        order.push_back("closed " + where);
+    });
+    FleetHooks hooks = bench.hooks();
+    hooks.claim = [&mutex, &changed, &order, claim = hooks.claim](const std::string& resource, bool wait) {
+        {
+            const std::scoped_lock lock(mutex);
+            order.push_back("claim " + resource);
+        }
+        changed.notify_all();
+        return claim(resource, wait);
+    };
+    Fleet fleet(hooks);
+    esp32::Esp32Settings first = automatic();
+    first.port = "COM7";
+    lookFor(fleet, first);
+    REQUIRE(connected(fleet, "serial-com7"));
+
+    esp32::Esp32Settings second = automatic();
+    second.port = "COM8";
+    fleet.setSettings(second);
+    REQUIRE(connected(fleet, "serial-com8"));
+    const std::scoped_lock lock(mutex);
+    const auto closed = std::ranges::find(order, std::string("closed COM7"));
+    const auto claimed = std::ranges::find(order, std::string("claim serial:COM8"));
+    REQUIRE(closed != order.end());
+    REQUIRE(claimed != order.end());
+    CHECK(closed < claimed);
 }
 
 TEST_CASE("ADR-0112: a port someone else holds is not opened, and an idle board is let go to whoever asks for its "

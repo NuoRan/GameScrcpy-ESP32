@@ -110,6 +110,7 @@ Events (`events.on(topic, ({ value }) => …)`): `board.added`, `board.changed`,
   - Flashing: when the board runs this firmware and its partition table matches the new image, an upgrade keeps the board's settings (Wi-Fi, name, key and Bluetooth pairings) instead of clearing them; a board that does not answer is still written in full.
   - Pairing: when Windows still holds an old pairing that the board has forgotten (for example after flashing cleared its settings), Pair over Bluetooth removes the old pairing and pairs again instead of failing with "not paired" every time.
   - The computer's Bluetooth link: it never connected to a real board (Windows, asked to look up a service by its 128-bit UUID without its cache, always answered "the device does not recognize the command"). The extension now lists all services without the cache and picks the serial service from them. Checked on an ESP32-S3: pairing, connecting over Bluetooth, an upgrade from the extension that needs no new pairing, and pairing again after the board's settings were erased.
+  - Switching the connection from serial to Bluetooth no longer reports the board as in use by someone else and connects only after a dozen seconds: the old serial link is closed before the new search starts (closing the port takes about two seconds, and the new search's claim used to time out meanwhile).
 
 ## Not done yet
 

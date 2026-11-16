@@ -437,9 +437,12 @@ void Fleet::setSettings(esp32::Esp32Settings settings)
         m_problem.reset();
         m_trouble.reset();
         cancelScan();
-        requestScanLocked();
     }
     finish(dropped);
+    {
+        const std::scoped_lock lock(m_mutex);
+        requestScanLocked();
+    }
     notify();
 }
 
